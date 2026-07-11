@@ -6,6 +6,9 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
     pub uuid: String,
+    /// Discord user ID (snowflake) — used to detect returning registrations.
+    #[sea_orm(column_type = "Text", unique)]
+    pub discord_id: String,
     /// AES-256 key (32 bytes) stored as binary.
     pub aes_key: Vec<u8>,
     /// Discord OAuth2 access token.

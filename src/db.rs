@@ -15,6 +15,7 @@ pub async fn init_database(url: &str) -> Result<DatabaseConnection, DbErr> {
     let sql = r#"
         CREATE TABLE IF NOT EXISTS users (
             uuid TEXT PRIMARY KEY,
+            discord_id TEXT NOT NULL UNIQUE,
             aes_key BLOB NOT NULL,
             access_token TEXT NOT NULL,
             refresh_token TEXT NOT NULL,
@@ -36,6 +37,7 @@ pub async fn init_database(url: &str) -> Result<DatabaseConnection, DbErr> {
 pub async fn create_user(
     db: &DatabaseConnection,
     uuid: &Uuid,
+    discord_id: &str,
     aes_key: &[u8],
     access_token: &str,
     refresh_token: &str,
@@ -44,6 +46,7 @@ pub async fn create_user(
 ) -> Result<(), DbErr> {
     let user = models::ActiveModel {
         uuid: Set(uuid.to_string()),
+        discord_id: Set(discord_id.to_string()),
         aes_key: Set(aes_key.to_vec()),
         access_token: Set(access_token.to_string()),
         refresh_token: Set(refresh_token.to_string()),
@@ -52,6 +55,17 @@ pub async fn create_user(
     };
     user.insert(db).await?;
     Ok(())
+}
+
+/// Find a user by their Discord snowflake ID.
+pub async fn get_user_by_discord_id(
+    db: &DatabaseConnection,
+    discord_id: &str,
+) -> Result<Option<models::Model>, DbErr> {
+    models::Entity::find()
+        .filter(models::Column::DiscordId.eq(discord_id))
+        .one(db)
+        .await
 }
 
 /// Retrieve a user by their UUID.

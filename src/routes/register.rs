@@ -55,16 +55,67 @@ pub async fn handler(
     let token_resp: DiscordTokenResponse = discord_resp.json().await
         .map_err(|_e| error_response(502, "discord_error", "Failed to parse Discord response"))?;
 
-    // Generate UUID and AES key
-    let uuid = Uuid::new_v4();
-    let aes_key = crypto::generate_aes_key();
+    // Fetch the Discord user's identity (to get their snowflake ID)
+    let user_resp = client
+        .get("https://discord.com/api/v10/users/@me")
+        .header("Authorization", format!("Bearer {}", token_resp.access_token))
+        .send()
+        .await
+        .map_err(|_e| error_response(502, "discord_error", "Failed to fetch Discord user"))?;
+
+    if !user_resp.status().is_success() {
+        return Err(error_response(502, "discord_error", "Discord user endpoint failed"));
+    }
+
+    #[derive(serde::Deserialize)]
+    struct DiscordUserResponse {
+        id: String,
+    }
+
+    let user_info: DiscordUserResponse = user_resp.json().await
+        .map_err(|_e| error_response(502, "discord_error", "Failed to parse Discord user"))?;
+
+    let discord_id = &user_info.id;
     let now = crypto::now_secs();
     let expires_at = now + token_resp.expires_in as i64;
 
-    // Save to database
+    // Check if this Discord user has already registered
+    if let Some(existing_user) = db::get_user_by_discord_id(&state.db, discord_id)
+        .await
+        .map_err(|_e| error_response(500, "db_error", "Database query failed"))?
+    {
+        // Returning user: preserve uuid and aes_key, update tokens only
+        let uuid = existing_user.uuid.parse::<Uuid>()
+            .map_err(|_e| error_response(500, "db_error", "Invalid stored UUID"))?;
+
+        db::update_user_tokens(
+            &state.db,
+            &uuid,
+            &token_resp.access_token,
+            &token_resp.refresh_token,
+            expires_at,
+        )
+        .await
+        .map_err(|_e| error_response(500, "db_error", "Failed to update user tokens"))?;
+
+        let aes_hex = hex::encode(&existing_user.aes_key);
+        let body = format!("uuid={}&aes_key_hex={}", uuid, aes_hex);
+
+        return Ok(axum::response::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body.into())
+            .unwrap());
+    }
+
+    // New user: generate a fresh UUID and AES key
+    let uuid = Uuid::new_v4();
+    let aes_key = crypto::generate_aes_key();
+
     db::create_user(
         &state.db,
         &uuid,
+        discord_id,
         &aes_key,
         &token_resp.access_token,
         &token_resp.refresh_token,
