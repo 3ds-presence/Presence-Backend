@@ -185,6 +185,55 @@ impl SessionManager {
         Ok(nonce)
     }
 
+    /// Internal helper: verify that an active session's auth token and counter
+    /// are valid. Takes the active state directly and returns owned data,
+    /// avoiding complex lifetime issues with the sessions lock guard.
+    ///
+    /// Returns the client, aes_key, and the current values of last_counter
+    /// and last_activity on success.
+    async fn verify_active_session_inner(
+        state: &mut SessionState,
+        uuid: Uuid,
+        counter: u64,
+        auth_hex: &str,
+        fields: &[&str],
+        cooldown_secs: u64,
+    ) -> Result<(Arc<DiscordRpcClient>, [u8; 32], u64, Instant), SessionError> {
+        let (client, aes_key, last_counter, last_activity) = match state {
+            SessionState::Active { client, aes_key, last_counter, last_activity } => {
+                (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity)
+            }
+            SessionState::PendingVerify { .. } => {
+                return Err("session is pending verification, not active".into());
+            }
+        };
+
+        // Check cooldown
+        let elapsed = last_activity.elapsed().as_secs();
+        if elapsed < cooldown_secs {
+            return Err(SessionError::from(format!("cooldown: wait {} seconds", cooldown_secs - elapsed)));
+        }
+
+        // Log the verification details
+        let expected_hash = hex::encode(crypto::sha256_fields(fields));
+        log::debug!(
+            "verify: uuid={} counter={} fields={:?} auth_hex={}.. expected_hash={}",
+            uuid, counter, fields,
+            &auth_hex[..16], expected_hash
+        );
+
+        // Verify auth
+        crypto::verify_activity_auth(auth_hex, counter, fields, &aes_key)
+            .map_err(|e| SessionError::from(format!("auth verification failed: {}", e)))?;
+
+        // Check counter monotonic
+        if counter <= last_counter {
+            return Err(SessionError::from(format!("replay detected: counter {} <= last {}", counter, last_counter)));
+        }
+
+        Ok((client, aes_key, last_counter, last_activity))
+    }
+
     /// Update activity for an active session.
     pub async fn update_activity(
         &self,
@@ -201,50 +250,15 @@ impl SessionManager {
         let session = sessions.get_mut(&uuid)
             .ok_or_else(|| SessionError::from("session not found"))?;
 
-        let (client, aes_key, last_counter, last_activity) = match session {
-            SessionState::Active { client, aes_key, last_counter, last_activity } => {
-                (client.clone(), *aes_key, last_counter, last_activity)
-            }
-            SessionState::PendingVerify { .. } => {
-                return Err("session is pending verification, not active".into());
-            }
-        };
-
-        // Check cooldown
-        let elapsed = last_activity.elapsed().as_secs();
-        if elapsed < cooldown_secs {
-            return Err(SessionError::from(format!("cooldown: wait {} seconds", cooldown_secs - elapsed)));
-        }
-
         // Build the fields slice for SHA256
         let state_str = state.unwrap_or("");
         let details_str = details.unwrap_or("");
         let activity_type_str = &activity_type.map(|t| t.to_string()).unwrap_or_default();
         let fields = [state_str, details_str, activity_type_str];
 
-        // Verify auth
-        crypto::verify_activity_auth(auth_hex, counter, &fields, &aes_key)
-            .map_err(|e| SessionError::from(format!("auth verification failed: {}", e)))?;
-
-        // Check counter monotonic
-        let last_val = last_counter.load(Ordering::SeqCst);
-        if counter <= last_val {
-            return Err(SessionError::from(format!("replay detected: counter {} <= last {}", counter, last_val)));
-        }
-
-        // Check for stop signal (activity_type == 255)
-        if activity_type == Some(255) {
-            // Stop the activity
-            let client_stop = client.clone();
-            tokio::task::spawn_blocking(move || {
-                let _ = client_stop.stop_activity();
-            }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
-
-            // Remove the session
-            sessions.remove(&uuid);
-            log::info!("session {}: activity stopped by client", uuid);
-            return Ok(());
-        }
+        // Verify the session is active and auth is valid
+        let (client, _aes_key, _, _) =
+            Self::verify_active_session_inner(session, uuid, counter, auth_hex, &fields, cooldown_secs).await?;
 
         // Build the Activity and send it via spawn_blocking
         let mut activity = discord_social_rpc::Activity::new();
@@ -274,8 +288,43 @@ impl SessionManager {
         }).await.map_err(|e| SessionError::from(format!("set_activity spawn failed: {}", e)))?;
 
         // Update state
-        last_counter.store(counter, Ordering::SeqCst);
-        *last_activity = Instant::now();
+        if let SessionState::Active { last_counter, last_activity, .. } = session {
+            last_counter.store(counter, Ordering::SeqCst);
+            *last_activity = Instant::now();
+        }
+
+        Ok(())
+    }
+
+    /// Stop the Discord activity for an active session and remove the session.
+    pub async fn stop_activity(
+        &self,
+        uuid: Uuid,
+        counter: u64,
+        auth_hex: &str,
+        cooldown_secs: u64,
+    ) -> Result<(), SessionError> {
+        let mut sessions = self.sessions.lock().await;
+
+        let session = sessions.get_mut(&uuid)
+            .ok_or_else(|| SessionError::from("session not found"))?;
+
+        // Fields for logout: use ["logout","",""] as the auth payload
+        let fields = ["logout", "", ""];
+
+        // Verify the session is active and auth is valid
+        let (client, _aes_key, _, _) =
+            Self::verify_active_session_inner(session, uuid, counter, auth_hex, &fields, cooldown_secs).await?;
+
+        // Stop the activity
+        let client_stop = client.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = client_stop.stop_activity();
+        }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
+
+        // Remove the session
+        sessions.remove(&uuid);
+        log::info!("session {}: activity stopped by client (logout)", uuid);
 
         Ok(())
     }

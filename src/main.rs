@@ -80,6 +80,7 @@ async fn main() {
         .route("/login", post(routes::login::handler))
         .route("/login/verify", post(routes::login_verify::handler))
         .route("/activity", post(routes::activity::handler))
+        .route("/logout", post(routes::logout::handler))
         .with_state(state);
 
     // Start server

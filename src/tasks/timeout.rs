@@ -1,14 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{info, warn};
+use log::{info};
 
 use crate::session::SessionManager;
-use crate::AppState;
 
 /// Background task that checks for expired sessions every 10 seconds.
 /// Active sessions with no activity for `timeout_secs` seconds are stopped.
-/// Pending verify sessions older than 30 seconds are also cleaned up.
 pub async fn run(
     session_manager: Arc<SessionManager>,
     timeout_secs: u64,

@@ -141,9 +141,16 @@ pub fn verify_activity_auth(
     key: &[u8; 32],
 ) -> Result<u64, CryptoError> {
     // Decode hex
-    let ciphertext = hex::decode(auth_hex).map_err(|_| CryptoError::InvalidHex)?;
+    let ciphertext = hex::decode(auth_hex).map_err(|_| {
+        log::error!("verify_activity_auth: invalid hex (auth_hex len={})", auth_hex.len());
+        CryptoError::InvalidHex
+    })?;
 
     if ciphertext.len() != 48 {
+        log::error!(
+            "verify_activity_auth: wrong ciphertext size: got {} (expected 48)",
+            ciphertext.len()
+        );
         return Err(CryptoError::WrongInputSize);
     }
 
@@ -152,12 +159,20 @@ pub fn verify_activity_auth(
 
     // Expected: counter (8 bytes) || hash (32 bytes) = 40 bytes + 8 padding = 48
     if plaintext.len() != 40 {
+        log::error!(
+            "verify_activity_auth: decrypt got {} bytes (expected 40), maybe padding mismatch",
+            plaintext.len()
+        );
         return Err(CryptoError::PaddingInvalid);
     }
 
     // Extract counter
     let extracted_counter = u64_from_be_bytes(&plaintext[..8]);
     if extracted_counter != counter {
+        log::error!(
+            "verify_activity_auth: counter mismatch: extracted={}, claimed={}",
+            extracted_counter, counter
+        );
         return Err(CryptoError::IntegrityMismatch);
     }
 
@@ -165,6 +180,15 @@ pub fn verify_activity_auth(
     let expected_hash = sha256_fields(fields);
     let actual_hash = &plaintext[8..40];
     if actual_hash != expected_hash {
+        log::error!(
+            "verify_activity_auth: hash mismatch for fields={:?}",
+            fields
+        );
+        log::error!(
+            "  expected_hash={} actual_hash={}",
+            hex::encode(expected_hash),
+            hex::encode(actual_hash)
+        );
         return Err(CryptoError::IntegrityMismatch);
     }
 
