@@ -12,11 +12,8 @@ use crate::AppState;
 #[derive(Deserialize, Debug, Default)]
 pub struct ActivityForm {
     pub uuid: String,
-    pub counter: String,  // u64 as string for flexibility
     pub auth_hex: String,
-    pub state: Option<String>,
-    pub details: Option<String>,
-    pub activity_type: Option<String>, // u8 as string
+    pub titleid: String,
 }
 
 /// POST /activity — Update the Discord activity or stop it.
@@ -24,36 +21,26 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    if form.uuid.is_empty() || form.auth_hex.is_empty() || form.counter.is_empty() {
-        return Err(error_response(400, "missing_field", "uuid, counter, and auth_hex are required"));
+    if form.uuid.is_empty() || form.auth_hex.is_empty() || form.titleid.is_empty() {
+        return Err(error_response(400, "missing_field", "uuid, auth_hex, and titleid are required"));
+    }
+
+    if form.titleid.chars().count() != 16 {
+        return Err(error_response(400, "invalid_titleid", "titleid must be exactly 16 characters long"));
     }
 
     let uuid = Uuid::parse_str(&form.uuid)
         .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
 
-    let counter: u64 = form.counter.parse()
-        .map_err(|_| error_response(400, "invalid_counter", "Counter must be a positive integer"))?;
-
-    let activity_type: Option<u8> = match &form.activity_type {
-        Some(t) => Some(t.parse().map_err(|_|
-            error_response(400, "invalid_activity_type", "activity_type must be 0-255")
-        )?),
-        None => None,
-    };
-
-    let state_str = form.state.as_deref();
-    let details_str = form.details.as_deref();
+    let titleid = form.titleid.as_str();
 
     // Update activity in session manager
     state.session_manager
         .update_activity(
+            &state,
             uuid,
-            counter,
             &form.auth_hex,
-            state_str,
-            details_str,
-            activity_type,
-            state.config.activity_cooldown_secs,
+            titleid,
         )
         .await
         .map_err(|e| e.into_response())?;

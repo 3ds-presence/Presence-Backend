@@ -9,7 +9,7 @@ use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::crypto;
+use crate::{AppState, crypto};
 use crate::error::error_response;
 
 /// Timeout for pending verification sessions (seconds).
@@ -245,11 +245,10 @@ impl SessionManager {
     /// Returns (client, client_ip) on success.
     async fn verify_active_session_inner(
         state: &mut SessionState,
-        counter: u64,
         auth_hex: &str,
         fields: &[&str],
         cooldown_secs: u64,
-    ) -> Result<(Arc<DiscordRpcClient>, IpAddr), SessionError> {
+    ) -> Result<(Arc<DiscordRpcClient>, IpAddr, u64), SessionError> {
         let (client, aes_key, last_counter, last_activity, client_ip) = match state {
             SessionState::Active { client, aes_key, last_counter, last_activity, client_ip } => {
                 (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity, *client_ip)
@@ -266,64 +265,39 @@ impl SessionManager {
         }
 
         // Verify auth
-        crypto::verify_activity_auth(auth_hex, counter, fields, &aes_key)
+        let good_counter = last_counter+1;
+        crypto::verify_activity_auth(auth_hex, good_counter, fields, &aes_key)
             .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
 
-        // Check counter monotonic
-        if counter <= last_counter {
-            return Err(SessionError::ReplayDetected { counter, last: last_counter });
-        }
 
-        Ok((client, client_ip))
+        Ok((client, client_ip, good_counter))
     }
 
     /// Update activity for an active session.
     pub async fn update_activity(
         &self,
+        state: &AppState,
         uuid: Uuid,
-        counter: u64,
         auth_hex: &str,
-        state: Option<&str>,
-        details: Option<&str>,
-        activity_type: Option<u8>,
-        cooldown_secs: u64,
+        titleid: &str,
     ) -> Result<(), SessionError> {
         let mut sessions = self.sessions.lock().await;
 
         let session = sessions.get_mut(&uuid)
             .ok_or_else(|| SessionError::SessionNotFound)?;
 
+        let cooldown_secs = state.config.activity_cooldown_secs;
+
         // Build the fields slice for SHA256
-        let state_str = state.unwrap_or("");
-        let details_str = details.unwrap_or("");
-        let activity_type_str = &activity_type.map(|t| t.to_string()).unwrap_or_default();
-        let fields = [state_str, details_str, activity_type_str];
+        let field = format!("titleid={}", titleid);
+        let fields = [field.as_str()];
 
         // Verify the session is active and auth is valid
-        let (client, _client_ip) =
-            Self::verify_active_session_inner(session, counter, auth_hex, &fields, cooldown_secs).await?;
+        let (client, _client_ip, good_counter) =
+            Self::verify_active_session_inner(session, auth_hex, &fields, cooldown_secs).await?;
 
         // Build the Activity and send it via spawn_blocking
-        let mut activity = discord_social_rpc::Activity::new();
-        if let Some(s) = state {
-            if !s.is_empty() {
-                activity = activity.state(s);
-            }
-        }
-        if let Some(d) = details {
-            if !d.is_empty() {
-                activity = activity.details(d);
-            }
-        }
-        if let Some(t) = activity_type {
-            let at = match t {
-                2 => discord_social_rpc::ActivityType::Listening,
-                3 => discord_social_rpc::ActivityType::Watching,
-                5 => discord_social_rpc::ActivityType::Competing,
-                _ => discord_social_rpc::ActivityType::Playing,
-            };
-            activity = activity.activity_type(at);
-        }
+        let activity = state.game_db.build_activity(titleid).await;
 
         let client_set = client.clone();
         tokio::task::spawn_blocking(move || {
@@ -332,7 +306,7 @@ impl SessionManager {
 
         // Update state
         if let SessionState::Active { last_counter, last_activity, .. } = session {
-            last_counter.store(counter, Ordering::SeqCst);
+            last_counter.store(good_counter, Ordering::SeqCst);
             *last_activity = Instant::now();
         }
 
@@ -343,7 +317,6 @@ impl SessionManager {
     pub async fn stop_activity(
         &self,
         uuid: Uuid,
-        counter: u64,
         auth_hex: &str,
         cooldown_secs: u64,
     ) -> Result<(), SessionError> {
@@ -356,8 +329,8 @@ impl SessionManager {
         let fields = ["logout", "", ""];
 
         // Verify the session is active and auth is valid
-        let (client, _client_ip) =
-            Self::verify_active_session_inner(session, counter, auth_hex, &fields, cooldown_secs).await?;
+        let (client, _client_ip, _good_counter) =
+            Self::verify_active_session_inner(session, auth_hex, &fields, cooldown_secs).await?;
 
         // Stop the activity
         let client_stop = client.clone();

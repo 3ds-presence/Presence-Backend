@@ -17,6 +17,10 @@ pub struct Config {
     pub max_clients_per_ip: usize,
     /// Server listen address.
     pub listen_addr: String,
+    /// Base URL for game icon images (e.g. "http://localhost:8080/imgs/").
+    pub assets_base_url: String,
+    /// Directory containing game metadata (title_id/meta.json).
+    pub info_dir: String,
 }
 
 impl Config {
@@ -42,6 +46,10 @@ impl Config {
                 .unwrap_or(8),
             listen_addr: env::var("LISTEN_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:5555".to_string()),
+            assets_base_url: env::var("ASSETS_BASE_URL")
+                .expect("ASSETS_BASE_URL must be set in .env"),
+            info_dir: env::var("INFO_DIR")
+                .unwrap_or_else(|_| "activity_manager/info".to_string()),
         }
     }
 }

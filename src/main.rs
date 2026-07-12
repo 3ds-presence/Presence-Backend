@@ -5,6 +5,7 @@ use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
 
+use activity_manager::GameDatabase;
 use discord_social_rpc::DiscordSocialRpc;
 
 mod config;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub discord_rpc: DiscordSocialRpc,
     pub session_manager: Arc<SessionManager>,
+    pub game_db: GameDatabase,
 }
 
 #[tokio::main]
@@ -53,12 +55,19 @@ async fn main() {
     // Create session manager
     let session_manager = Arc::new(SessionManager::new());
 
+    // Initialize game database (in-memory catalogue of game metadata)
+    let game_db = GameDatabase::new(&config.info_dir, &config.assets_base_url)
+        .await
+        .expect("Failed to initialize game database");
+    info!("Game database initialized");
+
     // Create shared state
     let state = Arc::new(AppState {
         config: config.clone(),
         db,
         discord_rpc,
         session_manager: session_manager.clone(),
+        game_db,
     });
 
     // Start background tasks

@@ -12,7 +12,6 @@ use crate::AppState;
 #[derive(Deserialize, Debug, Default)]
 pub struct LogoutForm {
     pub uuid: String,
-    pub counter: String,  // u64 as string for flexibility
     pub auth_hex: String,
 }
 
@@ -21,19 +20,16 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LogoutForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    if form.uuid.is_empty() || form.auth_hex.is_empty() || form.counter.is_empty() {
-        return Err(error_response(400, "missing_field", "uuid, counter, and auth_hex are required"));
+    if form.uuid.is_empty() || form.auth_hex.is_empty() {
+        return Err(error_response(400, "missing_field", "uuid and auth_hex are required"));
     }
 
     let uuid = Uuid::parse_str(&form.uuid)
         .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
 
-    let counter: u64 = form.counter.parse()
-        .map_err(|_| error_response(400, "invalid_counter", "Counter must be a positive integer"))?;
-
     // Stop the activity via session manager
     state.session_manager
-        .stop_activity(uuid, counter, &form.auth_hex, 0)
+        .stop_activity(uuid, &form.auth_hex, 0)
         .await
         .map_err(|e| e.into_response())?;
 
