@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::response::{IntoResponse, Response};
 use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
@@ -175,6 +175,7 @@ impl SessionManager {
         cipher_hex: &str,
         discord_rpc: &DiscordSocialRpc,
         access_token: &str,
+        cooldown_secs: u64,
     ) -> Result<u64, SessionError> {
         let mut sessions = self.sessions.lock().await;
 
@@ -233,7 +234,7 @@ impl SessionManager {
             client,
             aes_key,
             last_counter: AtomicU64::new(nonce),
-            last_activity: Instant::now(),
+            last_activity: Instant::now() - Duration::from_secs(cooldown_secs + 1),
             client_ip,
         });
 

@@ -33,7 +33,7 @@ pub async fn handler(
 
     // Stop the activity via session manager
     state.session_manager
-        .stop_activity(uuid, counter, &form.auth_hex, state.config.activity_cooldown_secs)
+        .stop_activity(uuid, counter, &form.auth_hex, 0)
         .await
         .map_err(|e| e.into_response())?;
 

@@ -35,7 +35,7 @@ pub async fn handler(
 
     // Verify the encrypted nonce and activate the session
     let nonce = state.session_manager
-        .verify_and_activate(uuid, &form.cipher_hex, &state.discord_rpc, &user.access_token)
+        .verify_and_activate(uuid, &form.cipher_hex, &state.discord_rpc, &user.access_token, state.config.activity_cooldown_secs)
         .await
         .map_err(|e| {
             error_response(403, "auth_failed", &format!("Verification failed: {}", e))
