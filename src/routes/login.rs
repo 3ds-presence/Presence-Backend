@@ -5,6 +5,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::db;
+use crate::error::error_response;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -20,17 +21,17 @@ pub async fn handler(
 ) -> Result<axum::response::Response, axum::response::Response> {
     // Parse UUID
     let uuid = Uuid::parse_str(&form.uuid)
-        .map_err(|_| super::register::error_response(400, "invalid_uuid", "Invalid UUID format"))?;
+        .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
 
     // Look up user in database
     let user = db::get_user_by_uuid(&state.db, &uuid)
         .await
-        .map_err(|_e| super::register::error_response(500, "db_error", "Database error"))?
-        .ok_or_else(|| super::register::error_response(404, "user_not_found", "User not found"))?;
+        .map_err(|_e| error_response(500, "db_error", "Database error"))?
+        .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
     // Convert aes_key from DB to [u8; 32]
     if user.aes_key.len() != 32 {
-        return Err(super::register::error_response(500, "crypto_error", "Invalid AES key in database"));
+        return Err(error_response(500, "crypto_error", "Invalid AES key in database"));
     }
     let mut aes_key = [0u8; 32];
     aes_key.copy_from_slice(&user.aes_key);
@@ -45,7 +46,7 @@ pub async fn handler(
     let nonce = state.session_manager
         .create_pending(uuid, aes_key, client_ip, state.config.max_clients_per_ip)
         .await
-        .map_err(|e| super::register::error_response(429, "rate_limited", e))?;
+        .map_err(|e| error_response(429, "rate_limited", e))?;
 
     let body = format!("nonce={}", nonce);
 

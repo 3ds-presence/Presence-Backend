@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::crypto;
 use crate::db;
+use crate::error::error_response;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -133,15 +134,4 @@ pub async fn handler(
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.into())
         .unwrap())
-}
-
-/// Build an error response with form-urlencoded body.
-pub fn error_response(status: u16, code: &str, message: &str) -> axum::response::Response {
-    let encoded = message.replace(' ', "+");
-    let body = format!("error={}&message={}", code, encoded);
-    axum::response::Response::builder()
-        .status(status)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.into())
-        .unwrap()
 }

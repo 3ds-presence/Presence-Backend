@@ -4,13 +4,13 @@ use axum::routing::post;
 use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
-use tokio::runtime::Runtime;
 
 use discord_social_rpc::DiscordSocialRpc;
 
 mod config;
 mod crypto;
 mod db;
+mod error;
 mod models;
 mod routes;
 mod session;
@@ -68,8 +68,9 @@ async fn main() {
     });
 
     let refresh_db = state.db.clone();
+    let refresh_config = state.config.clone();
     tokio::spawn(async move {
-        tasks::token_refresh::run(refresh_db).await;
+        tasks::token_refresh::run(refresh_db, refresh_config).await;
     });
 
     // Build router

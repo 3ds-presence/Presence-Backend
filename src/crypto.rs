@@ -1,15 +1,11 @@
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 
 /// Size of our AES-256 key.
 pub const AES_KEY_LEN: usize = 32;
-
-/// Size of a nonce (8 bytes transferred as u64).
-pub const NONCE_LEN: usize = 8;
 
 /// Size of a SHA-256 hash.
 pub const SHA256_LEN: usize = 32;
@@ -18,10 +14,8 @@ pub const SHA256_LEN: usize = 32;
 #[derive(Debug)]
 pub enum CryptoError {
     InvalidHex,
-    WrongKeySize,
     WrongInputSize,
     PaddingInvalid,
-    DecryptionFailed,
     IntegrityMismatch,
 }
 
@@ -29,10 +23,8 @@ impl std::fmt::Display for CryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidHex => write!(f, "invalid hex string"),
-            Self::WrongKeySize => write!(f, "wrong key size"),
             Self::WrongInputSize => write!(f, "wrong input size"),
             Self::PaddingInvalid => write!(f, "PKCS7 padding is invalid"),
-            Self::DecryptionFailed => write!(f, "decryption failed"),
             Self::IntegrityMismatch => write!(f, "integrity check failed (SHA256 mismatch)"),
         }
     }
@@ -83,22 +75,6 @@ pub fn decrypt_padded(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Cryp
     Ok(pt.to_vec())
 }
 
-/// Encrypt a single block (16 bytes) with AES-256-CBC, IV=0.
-///
-/// Used for testing / reference; the client does this part.
-pub fn encrypt_block(plaintext: &[u8; 16], key: &[u8; 32]) -> [u8; 16] {
-    let iv = [0u8; 16];
-    let mut buf = *plaintext;
-
-    let pt = Aes256CbcEnc::new(key.into(), &iv.into())
-        .encrypt_padded_mut::<Pkcs7>(&mut buf, 16)
-        .expect("buffer is exactly 16 bytes");
-
-    let mut result = [0u8; 16];
-    result[..pt.len()].copy_from_slice(pt);
-    result
-}
-
 /// Calculate SHA-256 of concatenated fields in a fixed order.
 ///
 /// Fields are concatenated as raw UTF-8 bytes without delimiters.
@@ -120,11 +96,6 @@ pub fn u64_from_be_bytes(bytes: &[u8]) -> u64 {
     u64::from_be_bytes(arr)
 }
 
-/// Convert u64 to big-endian bytes.
-pub fn u64_to_be_bytes(val: u64) -> [u8; 8] {
-    val.to_be_bytes()
-}
-
 /// Verify the auth token for an activity request.
 ///
 /// Parameters:
@@ -141,16 +112,10 @@ pub fn verify_activity_auth(
     key: &[u8; 32],
 ) -> Result<u64, CryptoError> {
     // Decode hex
-    let ciphertext = hex::decode(auth_hex).map_err(|_| {
-        log::error!("verify_activity_auth: invalid hex (auth_hex len={})", auth_hex.len());
-        CryptoError::InvalidHex
-    })?;
+    let ciphertext = hex::decode(auth_hex)
+        .map_err(|_| CryptoError::InvalidHex)?;
 
     if ciphertext.len() != 48 {
-        log::error!(
-            "verify_activity_auth: wrong ciphertext size: got {} (expected 48)",
-            ciphertext.len()
-        );
         return Err(CryptoError::WrongInputSize);
     }
 
@@ -159,20 +124,12 @@ pub fn verify_activity_auth(
 
     // Expected: counter (8 bytes) || hash (32 bytes) = 40 bytes + 8 padding = 48
     if plaintext.len() != 40 {
-        log::error!(
-            "verify_activity_auth: decrypt got {} bytes (expected 40), maybe padding mismatch",
-            plaintext.len()
-        );
         return Err(CryptoError::PaddingInvalid);
     }
 
     // Extract counter
     let extracted_counter = u64_from_be_bytes(&plaintext[..8]);
     if extracted_counter != counter {
-        log::error!(
-            "verify_activity_auth: counter mismatch: extracted={}, claimed={}",
-            extracted_counter, counter
-        );
         return Err(CryptoError::IntegrityMismatch);
     }
 
@@ -180,45 +137,10 @@ pub fn verify_activity_auth(
     let expected_hash = sha256_fields(fields);
     let actual_hash = &plaintext[8..40];
     if actual_hash != expected_hash {
-        log::error!(
-            "verify_activity_auth: hash mismatch for fields={:?}",
-            fields
-        );
-        log::error!(
-            "  expected_hash={} actual_hash={}",
-            hex::encode(expected_hash),
-            hex::encode(actual_hash)
-        );
         return Err(CryptoError::IntegrityMismatch);
     }
 
     Ok(counter)
-}
-
-/// Build the auth data that a client would send (for reference / testing).
-/// Returns the hex-encoded ciphertext (96 hex chars).
-#[allow(dead_code)]
-pub fn build_activity_auth(
-    counter: u64,
-    fields: &[&str],
-    key: &[u8; 32],
-) -> String {
-    let hash = sha256_fields(fields);
-
-    let mut input = Vec::with_capacity(48);
-    input.extend_from_slice(&u64_to_be_bytes(counter));
-    input.extend_from_slice(&hash);
-    // input is 40 bytes, pad to 48 with PKCS7
-    let pad_len = 48 - input.len();
-    input.extend(std::iter::repeat(pad_len as u8).take(pad_len));
-
-    let iv = [0u8; 16];
-    let mut buf = input.clone();
-    let _ = Aes256CbcEnc::new(key.into(), &iv.into())
-        .encrypt_padded_mut::<Pkcs7>(&mut buf, 48)
-        .expect("buffer is exactly 48 bytes");
-
-    hex::encode(&buf[..48])
 }
 
 /// Get the current Unix timestamp in seconds.

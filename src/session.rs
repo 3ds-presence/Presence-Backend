@@ -4,11 +4,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::response::{IntoResponse, Response};
 use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::crypto;
+use crate::error::error_response;
 
 /// Timeout for pending verification sessions (seconds).
 const PENDING_TIMEOUT_SECS: u64 = 30;
@@ -50,28 +52,54 @@ impl std::fmt::Debug for SessionState {
 /// Custom session error type.
 #[derive(Debug)]
 pub enum SessionError {
-    Message(String),
+    SessionNotFound,
+    PendingNotActive,
+    AuthFailed(String),
+    ReplayDetected { counter: u64, last: u64 },
+    Cooldown { remaining: u64 },
+    Other(String),
 }
 
 impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Message(msg) => write!(f, "{}", msg),
+            Self::SessionNotFound => write!(f, "session not found"),
+            Self::PendingNotActive => write!(f, "session is pending verification, not active"),
+            Self::AuthFailed(msg) => write!(f, "auth verification failed: {}", msg),
+            Self::ReplayDetected { counter, last } => {
+                write!(f, "replay detected: counter {} <= last {}", counter, last)
+            }
+            Self::Cooldown { remaining } => write!(f, "cooldown: wait {} seconds", remaining),
+            Self::Other(msg) => write!(f, "{}", msg),
         }
     }
 }
 
 impl std::error::Error for SessionError {}
 
+impl IntoResponse for SessionError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::SessionNotFound | Self::PendingNotActive => {
+                error_response(401, "session_expired", "Session expired or not found. Please re-login.")
+            }
+            Self::AuthFailed(_) => error_response(403, "auth_failed", &self.to_string()),
+            Self::ReplayDetected { .. } => error_response(403, "replay_detected", &self.to_string()),
+            Self::Cooldown { .. } => error_response(429, "cooldown", &self.to_string()),
+            Self::Other(_) => error_response(400, "error", &self.to_string()),
+        }
+    }
+}
+
 impl From<&str> for SessionError {
     fn from(s: &str) -> Self {
-        SessionError::Message(s.to_string())
+        SessionError::Other(s.to_string())
     }
 }
 
 impl From<String> for SessionError {
     fn from(s: String) -> Self {
-        SessionError::Message(s)
+        SessionError::Other(s)
     }
 }
 
@@ -212,50 +240,40 @@ impl SessionManager {
         Ok(nonce)
     }
 
-    /// Internal helper: verify that an active session's auth token and counter
-    /// are valid. Takes the active state directly and returns owned data,
-    /// avoiding complex lifetime issues with the sessions lock guard.
+    /// Verify the auth and cooldown for an active session.
+    /// Returns (client, client_ip) on success.
     async fn verify_active_session_inner(
         state: &mut SessionState,
-        uuid: Uuid,
         counter: u64,
         auth_hex: &str,
         fields: &[&str],
         cooldown_secs: u64,
-    ) -> Result<(Arc<DiscordRpcClient>, [u8; 32], u64, Instant), SessionError> {
-        let (client, aes_key, last_counter, last_activity) = match state {
-            SessionState::Active { client, aes_key, last_counter, last_activity, .. } => {
-                (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity)
+    ) -> Result<(Arc<DiscordRpcClient>, IpAddr), SessionError> {
+        let (client, aes_key, last_counter, last_activity, client_ip) = match state {
+            SessionState::Active { client, aes_key, last_counter, last_activity, client_ip } => {
+                (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity, *client_ip)
             }
             SessionState::PendingVerify { .. } => {
-                return Err("session is pending verification, not active".into());
+                return Err(SessionError::PendingNotActive);
             }
         };
 
         // Check cooldown
         let elapsed = last_activity.elapsed().as_secs();
         if elapsed < cooldown_secs {
-            return Err(SessionError::from(format!("cooldown: wait {} seconds", cooldown_secs - elapsed)));
+            return Err(SessionError::Cooldown { remaining: cooldown_secs - elapsed });
         }
-
-        // Log the verification details
-        let expected_hash = hex::encode(crypto::sha256_fields(fields));
-        log::debug!(
-            "verify: uuid={} counter={} fields={:?} auth_hex={}.. expected_hash={}",
-            uuid, counter, fields,
-            &auth_hex[..16], expected_hash
-        );
 
         // Verify auth
         crypto::verify_activity_auth(auth_hex, counter, fields, &aes_key)
-            .map_err(|e| SessionError::from(format!("auth verification failed: {}", e)))?;
+            .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
 
         // Check counter monotonic
         if counter <= last_counter {
-            return Err(SessionError::from(format!("replay detected: counter {} <= last {}", counter, last_counter)));
+            return Err(SessionError::ReplayDetected { counter, last: last_counter });
         }
 
-        Ok((client, aes_key, last_counter, last_activity))
+        Ok((client, client_ip))
     }
 
     /// Update activity for an active session.
@@ -272,7 +290,7 @@ impl SessionManager {
         let mut sessions = self.sessions.lock().await;
 
         let session = sessions.get_mut(&uuid)
-            .ok_or_else(|| SessionError::from("session not found"))?;
+            .ok_or_else(|| SessionError::SessionNotFound)?;
 
         // Build the fields slice for SHA256
         let state_str = state.unwrap_or("");
@@ -281,8 +299,8 @@ impl SessionManager {
         let fields = [state_str, details_str, activity_type_str];
 
         // Verify the session is active and auth is valid
-        let (client, _aes_key, _, _) =
-            Self::verify_active_session_inner(session, uuid, counter, auth_hex, &fields, cooldown_secs).await?;
+        let (client, _client_ip) =
+            Self::verify_active_session_inner(session, counter, auth_hex, &fields, cooldown_secs).await?;
 
         // Build the Activity and send it via spawn_blocking
         let mut activity = discord_social_rpc::Activity::new();
@@ -331,14 +349,14 @@ impl SessionManager {
         let mut sessions = self.sessions.lock().await;
 
         let session = sessions.get_mut(&uuid)
-            .ok_or_else(|| SessionError::from("session not found"))?;
+            .ok_or_else(|| SessionError::SessionNotFound)?;
 
         // Fields for logout: use ["logout","",""] as the auth payload
         let fields = ["logout", "", ""];
 
         // Verify the session is active and auth is valid
-        let (client, _aes_key, _, _) =
-            Self::verify_active_session_inner(session, uuid, counter, auth_hex, &fields, cooldown_secs).await?;
+        let (client, _client_ip) =
+            Self::verify_active_session_inner(session, counter, auth_hex, &fields, cooldown_secs).await?;
 
         // Stop the activity
         let client_stop = client.clone();

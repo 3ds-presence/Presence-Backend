@@ -1,6 +1,6 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbErr,
-    EntityTrait, QueryFilter, Set, Statement,
+    EntityTrait, QueryFilter, Schema, Set,
 };
 use uuid::Uuid;
 
@@ -10,25 +10,13 @@ use crate::models;
 pub async fn init_database(url: &str) -> Result<DatabaseConnection, DbErr> {
     let db = Database::connect(url).await?;
 
-    // Create the users table if it doesn't exist
-    // We use a raw SQL statement for SQLite compatibility
-    let sql = r#"
-        CREATE TABLE IF NOT EXISTS users (
-            uuid TEXT PRIMARY KEY,
-            discord_id TEXT NOT NULL UNIQUE,
-            aes_key BLOB NOT NULL,
-            access_token TEXT NOT NULL,
-            refresh_token TEXT NOT NULL,
-            token_expires_at INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-        )
-    "#;
-
-    db.execute(Statement::from_string(
-        db.get_database_backend(),
-        sql,
-    ))
-    .await?;
+    // Create the users table from the entity definition
+    let backend = db.get_database_backend();
+    let schema = Schema::new(backend);
+    let mut create_stmt = schema.create_table_from_entity(models::Entity);
+    create_stmt.if_not_exists();
+    let stmt = backend.build(&create_stmt);
+    db.execute(stmt).await?;
 
     Ok(db)
 }
@@ -101,11 +89,6 @@ pub async fn update_user_tokens(
     }
 
     Ok(())
-}
-
-/// Get all users (used by token refresh background task).
-pub async fn get_all_users(db: &DatabaseConnection) -> Result<Vec<models::Model>, DbErr> {
-    models::Entity::find().all(db).await
 }
 
 /// Get users whose token is about to expire (within the given margin in seconds).

@@ -4,12 +4,13 @@ use std::time::Duration;
 use log::{info, warn};
 use sea_orm::DatabaseConnection;
 
+use crate::config::Config;
 use crate::db;
 
 /// Background task that refreshes Discord OAuth2 tokens before they expire.
 /// Runs every 60 seconds. Refreshes tokens that are within 1/7 of their lifetime
 /// from expiration (i.e., at the 6/7 mark).
-pub async fn run(db: DatabaseConnection) {
+pub async fn run(db: DatabaseConnection, config: Config) {
     info!("token refresh task started");
 
     loop {
@@ -40,10 +41,11 @@ pub async fn run(db: DatabaseConnection) {
         for user in users {
             let permit = semaphore.clone().acquire_owned().await.unwrap();
             let db_clone = db.clone();
+            let config_ref = config.clone();
 
             handles.push(tokio::spawn(async move {
                 let _permit = permit;
-                refresh_user_token(&db_clone, &user).await;
+                refresh_user_token(&db_clone, &user, &config_ref).await;
             }));
         }
 
@@ -55,12 +57,12 @@ pub async fn run(db: DatabaseConnection) {
 }
 
 /// Refresh a single user's Discord OAuth2 token.
-async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model) {
+async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model, config: &Config) {
     let client = reqwest::Client::new();
 
     let params = [
-        ("client_id", &std::env::var("CLIENT_ID").unwrap_or_default()),
-        ("client_secret", &std::env::var("CLIENT_SECRET").unwrap_or_default()),
+        ("client_id", &config.client_id),
+        ("client_secret", &config.client_secret),
         ("grant_type", &"refresh_token".to_string()),
         ("refresh_token", &user.refresh_token),
     ];
