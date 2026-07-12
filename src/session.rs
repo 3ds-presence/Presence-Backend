@@ -20,6 +20,7 @@ pub enum SessionState {
         nonce: u64,
         aes_key: [u8; 32],
         created_at: Instant,
+        client_ip: IpAddr,
     },
     /// Session is active — DiscordRpcClient is connected and running.
     Active {
@@ -27,6 +28,7 @@ pub enum SessionState {
         aes_key: [u8; 32],
         last_counter: AtomicU64,
         last_activity: Instant,
+        client_ip: IpAddr,
     },
 }
 
@@ -87,6 +89,29 @@ impl SessionManager {
         }
     }
 
+    /// Decrement the IP counter for a given address.
+    fn decrement_ip(ip_counts: &mut HashMap<IpAddr, usize>, ip: IpAddr) {
+        match ip_counts.get_mut(&ip) {
+            Some(count) if *count > 1 => *count -= 1,
+            _ => {
+                ip_counts.remove(&ip);
+            }
+        }
+    }
+
+    /// Extract the client IP from a session state (if present) and decrement the counter.
+    async fn remove_session_with_ip(&self, uuid: &Uuid) -> Option<SessionState> {
+        let mut sessions = self.sessions.lock().await;
+        let mut ip_counts = self.ip_counts.lock().await;
+
+        let state = sessions.remove(uuid);
+        if let Some(ref s) = state {
+            let ip = s.client_ip();
+            Self::decrement_ip(&mut ip_counts, ip);
+        }
+        state
+    }
+
     /// Create a new pending session with a nonce challenge.
     pub async fn create_pending(
         &self,
@@ -109,6 +134,7 @@ impl SessionManager {
             nonce,
             aes_key,
             created_at: Instant::now(),
+            client_ip,
         });
 
         Ok(nonce)
@@ -127,8 +153,8 @@ impl SessionManager {
         let state = sessions.remove(&uuid)
             .ok_or_else(|| SessionError::from("no pending session for this uuid"))?;
 
-        let (nonce, aes_key) = match state {
-            SessionState::PendingVerify { nonce, aes_key, .. } => (nonce, aes_key),
+        let (nonce, aes_key, client_ip) = match state {
+            SessionState::PendingVerify { nonce, aes_key, client_ip, .. } => (nonce, aes_key, client_ip),
             SessionState::Active { .. } => {
                 return Err("session is already active".into());
             }
@@ -180,6 +206,7 @@ impl SessionManager {
             aes_key,
             last_counter: AtomicU64::new(nonce),
             last_activity: Instant::now(),
+            client_ip,
         });
 
         Ok(nonce)
@@ -188,9 +215,6 @@ impl SessionManager {
     /// Internal helper: verify that an active session's auth token and counter
     /// are valid. Takes the active state directly and returns owned data,
     /// avoiding complex lifetime issues with the sessions lock guard.
-    ///
-    /// Returns the client, aes_key, and the current values of last_counter
-    /// and last_activity on success.
     async fn verify_active_session_inner(
         state: &mut SessionState,
         uuid: Uuid,
@@ -200,7 +224,7 @@ impl SessionManager {
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, [u8; 32], u64, Instant), SessionError> {
         let (client, aes_key, last_counter, last_activity) = match state {
-            SessionState::Active { client, aes_key, last_counter, last_activity } => {
+            SessionState::Active { client, aes_key, last_counter, last_activity, .. } => {
                 (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity)
             }
             SessionState::PendingVerify { .. } => {
@@ -322,8 +346,11 @@ impl SessionManager {
             let _ = client_stop.stop_activity();
         }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
 
-        // Remove the session
+        // Remove the session and decrement IP count
+        let ip = session.client_ip();
         sessions.remove(&uuid);
+        let mut ip_counts = self.ip_counts.lock().await;
+        Self::decrement_ip(&mut ip_counts, ip);
         log::info!("session {}: activity stopped by client (logout)", uuid);
 
         Ok(())
@@ -354,10 +381,9 @@ impl SessionManager {
             .collect()
     }
 
-    /// Remove a session by UUID and return its state.
+    /// Remove a session by UUID, decrement IP counter, and return its state.
     pub async fn remove_session(&self, uuid: &Uuid) -> Option<SessionState> {
-        let mut sessions = self.sessions.lock().await;
-        sessions.remove(uuid)
+        self.remove_session_with_ip(uuid).await
     }
 
     /// Check if a session exists and is active.
@@ -372,6 +398,16 @@ impl SessionManager {
         match sessions.get(uuid) {
             Some(SessionState::Active { client, .. }) => Some(client.clone()),
             _ => None,
+        }
+    }
+}
+
+/// Helper to extract the client IP from any session state variant.
+impl SessionState {
+    pub fn client_ip(&self) -> IpAddr {
+        match self {
+            SessionState::PendingVerify { client_ip, .. } => *client_ip,
+            SessionState::Active { client_ip, .. } => *client_ip,
         }
     }
 }

@@ -45,12 +45,10 @@ async fn main() {
         .expect("Failed to initialize database");
     info!("Database initialized: {}", config.database_url);
 
-    // Create a tokio runtime for DiscordSocialRpc (shared runtime)
-    let discord_runtime = Arc::new(Runtime::new().expect("Failed to create tokio runtime"));
-
     // Create the global DiscordSocialRpc instance
     info!("DiscordSocialRpc initialized for app_id={}", config.client_id);
-    let discord_rpc = DiscordSocialRpc::with_runtime(&config.client_id, discord_runtime);
+    let discord_rpc = DiscordSocialRpc::new(&config.client_id)
+        .expect("Failed to create DiscordSocialRpc");
 
     // Create session manager
     let session_manager = Arc::new(SessionManager::new());
