@@ -1,4 +1,6 @@
-use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
+use rand::RngExt;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -32,16 +34,14 @@ impl std::fmt::Display for CryptoError {
 
 /// Generate a random AES-256 key using OS entropy.
 pub fn generate_aes_key() -> [u8; AES_KEY_LEN] {
-    use rand::RngCore;
     let mut key = [0u8; AES_KEY_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::rng().fill_bytes(&mut key);
     key
 }
 
 /// Generate a random nonce (u64) using OS entropy.
 pub fn generate_nonce() -> u64 {
-    use rand::Rng;
-    rand::rngs::OsRng.gen()
+    rand::rng().random()
 }
 
 /// Decrypt a single block (16 bytes) with AES-256-CBC, IV=0.
@@ -54,7 +54,7 @@ pub fn decrypt_block(ciphertext: &[u8; 16], key: &[u8; 32]) -> Result<Vec<u8>, C
     let mut buf = *ciphertext;
 
     let pt = Aes256CbcDec::new(key.into(), &iv.into())
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .decrypt_padded::<Pkcs7>(&mut buf)
         .map_err(|_| CryptoError::PaddingInvalid)?;
 
     Ok(pt.to_vec())
@@ -69,7 +69,7 @@ pub fn decrypt_padded(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Cryp
     let mut buf = ciphertext.to_vec();
 
     let pt = Aes256CbcDec::new(key.into(), &iv.into())
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .decrypt_padded::<Pkcs7>(&mut buf)
         .map_err(|_| CryptoError::PaddingInvalid)?;
 
     Ok(pt.to_vec())
