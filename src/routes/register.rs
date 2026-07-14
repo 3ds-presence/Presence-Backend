@@ -23,40 +23,13 @@ pub async fn handler(
         return Err(error_response(400, "missing_code", "Code is required"));
     }
 
-    // Exchange the code with Discord for tokens
-    let client = reqwest::Client::new();
-    let params = [
-        ("client_id", state.config.client_id.as_str()),
-        ("client_secret", state.config.client_secret.as_str()),
-        ("grant_type", "authorization_code"),
-        ("code", &form.code),
-        ("redirect_uri", &state.config.redirect_uri),
-    ];
-
-    let discord_resp = client
-        .post("https://discord.com/api/v10/oauth2/token")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| error_response(502, "discord_error", &format!("Discord request failed: {}", e)))?;
-
-    if !discord_resp.status().is_success() {
-        let status = discord_resp.status().as_u16();
-        return Err(error_response(502, "discord_error", &format!("Discord returned HTTP {}", status)));
-    }
-
-    #[derive(serde::Deserialize)]
-    struct DiscordTokenResponse {
-        access_token: String,
-        refresh_token: String,
-        expires_in: u64,
-    }
-
-    let token_resp: DiscordTokenResponse = discord_resp.json().await
-        .map_err(|_e| error_response(502, "discord_error", "Failed to parse Discord response"))?;
+    // Exchange the code with Discord for tokens via DiscordSocialRpcAdmin
+    let token_resp = state.discord_rpc
+        .exchange_code(&form.code, &state.config.redirect_uri)
+        .map_err(|e| error_response(502, "discord_error", &format!("Discord error: {}", e)))?;
 
     // Fetch the Discord user's identity (to get their snowflake ID)
+    let client = reqwest::Client::new();
     let user_resp = client
         .get("https://discord.com/api/v10/users/@me")
         .header("Authorization", format!("Bearer {}", token_resp.access_token))

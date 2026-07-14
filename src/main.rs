@@ -6,7 +6,7 @@ use log::info;
 use sea_orm::DatabaseConnection;
 
 use activity_manager::GameDatabase;
-use discord_social_rpc::DiscordSocialRpc;
+use discord_social_rpc::DiscordSocialRpcAdmin;
 
 mod config;
 mod crypto;
@@ -24,7 +24,7 @@ use session::SessionManager;
 pub struct AppState {
     pub config: Config,
     pub db: DatabaseConnection,
-    pub discord_rpc: DiscordSocialRpc,
+    pub discord_rpc: DiscordSocialRpcAdmin,
     pub session_manager: Arc<SessionManager>,
     pub game_db: GameDatabase,
 }
@@ -47,10 +47,10 @@ async fn main() {
         .expect("Failed to initialize database");
     info!("Database initialized: {}", config.database_url);
 
-    // Create the global DiscordSocialRpc instance
-    info!("DiscordSocialRpc initialized for app_id={}", config.client_id);
-    let discord_rpc = DiscordSocialRpc::new(&config.client_id)
-        .expect("Failed to create DiscordSocialRpc");
+    // Create the global DiscordSocialRpcAdmin instance
+    info!("DiscordSocialRpcAdmin initialized for app_id={}", config.client_id);
+    let discord_rpc = DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
+        .expect("Failed to create DiscordSocialRpcAdmin");
 
     // Create session manager
     let session_manager = Arc::new(SessionManager::new());
@@ -77,9 +77,9 @@ async fn main() {
     });
 
     let refresh_db = state.db.clone();
-    let refresh_config = state.config.clone();
+    let refresh_admin = state.discord_rpc.clone();
     tokio::spawn(async move {
-        tasks::token_refresh::run(refresh_db, refresh_config).await;
+        tasks::token_refresh::run(refresh_db, refresh_admin).await;
     });
 
     // Build router
