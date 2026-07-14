@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use axum::{extract::State, Form};
 use serde::Deserialize;
-use uuid::Uuid;
 
 use axum::response::IntoResponse;
 
-use crate::error::error_response;
+use crate::auth::Auth;
+use crate::response::success_response;
 use crate::AppState;
 
 #[derive(Deserialize, Debug, Default)]
@@ -20,24 +20,13 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LogoutForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    if form.uuid.is_empty() || form.auth_hex.is_empty() {
-        return Err(error_response(400, "missing_field", "uuid and auth_hex are required"));
-    }
-
-    let uuid = Uuid::parse_str(&form.uuid)
-        .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
+    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
     // Stop the activity via session manager
     state.session_manager
-        .stop_activity(uuid, &form.auth_hex, 0)
+        .stop_activity(&auth, 0)
         .await
         .map_err(|e| e.into_response())?;
 
-    let body = "success=true".to_string();
-
-    Ok(axum::response::Response::builder()
-        .status(200)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.into())
-        .unwrap())
+    Ok(success_response("success=true"))
 }

@@ -9,8 +9,8 @@ use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::{AppState, crypto};
-use crate::error::error_response;
+use crate::{AppState, auth::Auth, crypto};
+use crate::response::error_response;
 
 /// Timeout for pending verification sessions (seconds).
 const PENDING_TIMEOUT_SECS: u64 = 30;
@@ -127,13 +127,13 @@ impl SessionManager {
         }
     }
 
-    /// Extract the client IP from a session state (if present) and decrement the counter.
+    /// Remove a session by UUID, decrement IP counter, and return its state.
+    /// Only locks `ip_counts` if the session actually existed.
     async fn remove_session_with_ip(&self, uuid: &Uuid) -> Option<SessionState> {
         let mut sessions = self.sessions.lock().await;
-        let mut ip_counts = self.ip_counts.lock().await;
-
         let state = sessions.remove(uuid);
         if let Some(ref s) = state {
+            let mut ip_counts = self.ip_counts.lock().await;
             let ip = s.client_ip();
             Self::decrement_ip(&mut ip_counts, ip);
         }
@@ -171,15 +171,14 @@ impl SessionManager {
     /// Verify a pending session: check the encrypted nonce and promote to active.
     pub async fn verify_and_activate(
         &self,
-        uuid: Uuid,
-        cipher_hex: &str,
+        auth: &Auth,
         discord_rpc: &DiscordSocialRpc,
         access_token: &str,
         cooldown_secs: u64,
     ) -> Result<u64, SessionError> {
-        let mut sessions = self.sessions.lock().await;
-
-        let state = sessions.remove(&uuid)
+        // Use remove_session_with_ip so the IP counter is decremented
+        // even if verification fails after removal.
+        let state = self.remove_session_with_ip(&auth.uuid).await
             .ok_or_else(|| SessionError::from("no pending session for this uuid"))?;
 
         let (nonce, aes_key, client_ip) = match state {
@@ -190,7 +189,7 @@ impl SessionManager {
         };
 
         // Decode the ciphertext (32 hex chars = 16 bytes)
-        let cipher_bytes = hex::decode(cipher_hex)
+        let cipher_bytes = hex::decode(auth.hex())
             .map_err(|_| SessionError::from("invalid hex in cipher_hex"))?;
         if cipher_bytes.len() != 16 {
             return Err("cipher_hex must be 32 hex chars (16 bytes)".into());
@@ -201,7 +200,7 @@ impl SessionManager {
         // Decrypt. decrypt_block uses PKCS7 internally and returns only the
         // unpadded plaintext (8 bytes = the nonce). If padding was invalid,
         // it returns CryptoError::PaddingInvalid.
-        let plaintext = crypto::decrypt_block(&cipher_arr, &aes_key)
+        let plaintext = crypto::decrypt_aes_cbc(&cipher_arr, &aes_key)
             .map_err(|e| SessionError::from(format!("decryption failed: {}", e)))?;
 
         // plaintext should be exactly 8 bytes (nonce) + padding removed
@@ -227,10 +226,11 @@ impl SessionManager {
             let _ = client_clone.start_activity();
         }).await.map_err(|e| SessionError::from(format!("spawn_blocking failed: {}", e)))?;
 
-        log::info!("session {}: Discord client created and gateway started", uuid);
+        log::info!("session {}: Discord client created and gateway started", auth.uuid);
 
         // Store active session
-        sessions.insert(uuid, SessionState::Active {
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(auth.uuid, SessionState::Active {
             client,
             aes_key,
             last_counter: AtomicU64::new(nonce),
@@ -242,14 +242,18 @@ impl SessionManager {
     }
 
     /// Verify the auth and cooldown for an active session.
-    /// Returns (client, client_ip) on success.
-    async fn verify_active_session_inner(
-        state: &mut SessionState,
-        auth_hex: &str,
+    /// Returns (client, client_ip, good_counter) on success.
+    async fn authenticate_and_get_client(
+        &self,
+        auth: &Auth,
         fields: &[&str],
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, IpAddr, u64), SessionError> {
-        let (client, aes_key, last_counter, last_activity, client_ip) = match state {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions.get_mut(&auth.uuid)
+            .ok_or_else(|| SessionError::SessionNotFound)?;
+
+        let (client, aes_key, last_counter, last_activity, client_ip) = match session {
             SessionState::Active { client, aes_key, last_counter, last_activity, client_ip } => {
                 (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity, *client_ip)
             }
@@ -265,36 +269,45 @@ impl SessionManager {
         }
 
         // Verify auth
-        let good_counter = last_counter+1;
-        crypto::verify_activity_auth(auth_hex, good_counter, fields, &aes_key)
+        let good_counter = last_counter + 1;
+        crypto::verify_activity_auth(auth.hex(), good_counter, fields, &aes_key)
             .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
 
-
         Ok((client, client_ip, good_counter))
+    }
+
+    /// Shared: authenticate + cooldown for an active session, then update counter and last_activity.
+    /// Returns the DiscordRpcClient on success.
+    pub async fn authenticate_and_tick(
+        &self,
+        auth: &Auth,
+        fields: &[&str],
+        cooldown_secs: u64,
+    ) -> Result<(Arc<DiscordRpcClient>, u64), SessionError> {
+        let (client, _client_ip, good_counter) =
+            self.authenticate_and_get_client(auth, fields, cooldown_secs).await?;
+
+        // Second quick lock to update counter and last_activity
+        let mut sessions = self.sessions.lock().await;
+        if let Some(SessionState::Active { last_counter, last_activity, .. }) = sessions.get_mut(&auth.uuid) {
+            last_counter.store(good_counter, Ordering::SeqCst);
+            *last_activity = Instant::now();
+        }
+
+        Ok((client, good_counter))
     }
 
     /// Update activity for an active session.
     pub async fn update_activity(
         &self,
         state: &AppState,
-        uuid: Uuid,
-        auth_hex: &str,
+        auth: &Auth,
         titleid: &str,
     ) -> Result<(), SessionError> {
-        let mut sessions = self.sessions.lock().await;
-
-        let session = sessions.get_mut(&uuid)
-            .ok_or_else(|| SessionError::SessionNotFound)?;
-
-        let cooldown_secs = state.config.activity_cooldown_secs;
-
-        // Build the fields slice for SHA256
         let field = format!("titleid={}", titleid);
         let fields = [field.as_str()];
 
-        // Verify the session is active and auth is valid
-        let (client, _client_ip, good_counter) =
-            Self::verify_active_session_inner(session, auth_hex, &fields, cooldown_secs).await?;
+        let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
 
         // Build the Activity and send it via spawn_blocking
         let activity = state.game_db.build_activity(titleid).await;
@@ -304,33 +317,33 @@ impl SessionManager {
             let _ = client_set.set_activity(activity);
         }).await.map_err(|e| SessionError::from(format!("set_activity spawn failed: {}", e)))?;
 
-        // Update state
-        if let SessionState::Active { last_counter, last_activity, .. } = session {
-            last_counter.store(good_counter, Ordering::SeqCst);
-            *last_activity = Instant::now();
-        }
+        Ok(())
+    }
 
+    /// Heartbeat: verify session + auth + cooldown, update counter and last_activity,
+    /// but do NOT change the Discord activity.
+    pub async fn heartbeat(
+        &self,
+        auth: &Auth,
+        cooldown_secs: u64,
+    ) -> Result<(), SessionError> {
+        let fields: [&str; 0] = [];
+        let (_client, _good_counter) = self.authenticate_and_tick(auth, &fields, cooldown_secs).await?;
         Ok(())
     }
 
     /// Stop the Discord activity for an active session and remove the session.
     pub async fn stop_activity(
         &self,
-        uuid: Uuid,
-        auth_hex: &str,
+        auth: &Auth,
         cooldown_secs: u64,
     ) -> Result<(), SessionError> {
-        let mut sessions = self.sessions.lock().await;
-
-        let session = sessions.get_mut(&uuid)
-            .ok_or_else(|| SessionError::SessionNotFound)?;
-
         // Fields for logout: use ["logout","",""] as the auth payload
         let fields = ["logout", "", ""];
 
         // Verify the session is active and auth is valid
         let (client, _client_ip, _good_counter) =
-            Self::verify_active_session_inner(session, auth_hex, &fields, cooldown_secs).await?;
+            self.authenticate_and_get_client(auth, &fields, cooldown_secs).await?;
 
         // Stop the activity
         let client_stop = client.clone();
@@ -339,11 +352,8 @@ impl SessionManager {
         }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
 
         // Remove the session and decrement IP count
-        let ip = session.client_ip();
-        sessions.remove(&uuid);
-        let mut ip_counts = self.ip_counts.lock().await;
-        Self::decrement_ip(&mut ip_counts, ip);
-        log::info!("session {}: activity stopped by client (logout)", uuid);
+        self.remove_session_with_ip(&auth.uuid).await;
+        log::info!("session {}: activity stopped by client (logout)", auth.uuid);
 
         Ok(())
     }

@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::crypto;
 use crate::db;
-use crate::error::error_response;
+use crate::response::error_response;
+use crate::response::success_response;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -75,11 +76,7 @@ pub async fn handler(
         let aes_hex = hex::encode(&existing_user.aes_key);
         let body = format!("uuid={}&aes_key_hex={}", uuid, aes_hex);
 
-        return Ok(axum::response::Response::builder()
-            .status(200)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.into())
-            .unwrap());
+        return Ok(success_response(body));
     }
 
     // New user: generate a fresh UUID and AES key
@@ -102,9 +99,5 @@ pub async fn handler(
     let aes_hex = hex::encode(aes_key);
     let body = format!("uuid={}&aes_key_hex={}", uuid, aes_hex);
 
-    Ok(axum::response::Response::builder()
-        .status(200)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.into())
-        .unwrap())
+    Ok(success_response(body))
 }

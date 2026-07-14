@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use axum::{extract::State, Form};
 use serde::Deserialize;
-use uuid::Uuid;
 
 use crate::db;
-use crate::error::error_response;
+use crate::response::{error_response, success_response};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -20,7 +19,7 @@ pub async fn handler(
     Form(form): Form<LoginForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
     // Parse UUID
-    let uuid = Uuid::parse_str(&form.uuid)
+    let uuid = form.uuid.parse()
         .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
 
     // Look up user in database
@@ -50,9 +49,5 @@ pub async fn handler(
 
     let body = format!("nonce={}", nonce);
 
-    Ok(axum::response::Response::builder()
-        .status(200)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.into())
-        .unwrap())
+    Ok(success_response(body))
 }

@@ -44,27 +44,11 @@ pub fn generate_nonce() -> u64 {
     rand::rng().random()
 }
 
-/// Decrypt a single block (16 bytes) with AES-256-CBC, IV=0.
+/// Decrypt AES-256-CBC with IV=0 and remove PKCS7 padding.
 ///
-/// Used for login verify: client encrypts nonce+padding, server decrypts.
-///
-/// Returns the unpadded plaintext (should be 8 bytes for the nonce).
-pub fn decrypt_block(ciphertext: &[u8; 16], key: &[u8; 32]) -> Result<Vec<u8>, CryptoError> {
-    let iv = [0u8; 16];
-    let mut buf = *ciphertext;
-
-    let pt = Aes256CbcDec::new(key.into(), &iv.into())
-        .decrypt_padded::<Pkcs7>(&mut buf)
-        .map_err(|_| CryptoError::PaddingInvalid)?;
-
-    Ok(pt.to_vec())
-}
-
-/// Decrypt and verify a padded plaintext with AES-256-CBC, IV=0.
-///
-/// Used for activity auth verification. The ciphertext must be a multiple of 16 bytes.
+/// Used for both login verify (16-byte ciphertext) and activity auth (48-byte ciphertext).
 /// Returns the unpadded plaintext.
-pub fn decrypt_padded(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, CryptoError> {
+pub fn decrypt_aes_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, CryptoError> {
     let iv = [0u8; 16];
     let mut buf = ciphertext.to_vec();
 
@@ -120,7 +104,7 @@ pub fn verify_activity_auth(
     }
 
     // Decrypt
-    let plaintext = decrypt_padded(&ciphertext, key)?;
+    let plaintext = decrypt_aes_cbc(&ciphertext, key)?;
 
     // Expected: counter (8 bytes) || hash (32 bytes) = 40 bytes + 8 padding = 48
     if plaintext.len() != 40 {

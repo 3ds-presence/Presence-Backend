@@ -8,11 +8,12 @@ use sea_orm::DatabaseConnection;
 use activity_manager::GameDatabase;
 use discord_social_rpc::DiscordSocialRpcAdmin;
 
+mod auth;
 mod config;
 mod crypto;
 mod db;
-mod error;
 mod models;
+mod response;
 mod routes;
 mod session;
 mod tasks;
@@ -87,7 +88,8 @@ async fn main() {
         .route("/register", post(routes::register::handler))
         .route("/login", post(routes::login::handler))
         .route("/login/verify", post(routes::login_verify::handler))
-        .route("/activity", post(routes::activity::handler))
+        .route("/activity/set", post(routes::activity::set_handler))
+        .route("/activity/heartbeat", post(routes::activity::heartbeat_handler))
         .route("/logout", post(routes::logout::handler))
         .with_state(state);
 
