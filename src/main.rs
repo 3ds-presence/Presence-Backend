@@ -57,7 +57,7 @@ async fn main() {
     let session_manager = Arc::new(SessionManager::new());
 
     // Initialize game database (in-memory catalogue of game metadata)
-    let game_db = GameDatabase::new(&config.info_dir, &config.assets_base_url)
+    let game_db = GameDatabase::new(&config.info_dir, &config.assets_base_url, &config.mii_generator_server)
         .await
         .expect("Failed to initialize game database");
     info!("Game database initialized");

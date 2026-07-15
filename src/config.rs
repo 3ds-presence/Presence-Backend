@@ -21,6 +21,8 @@ pub struct Config {
     pub assets_base_url: String,
     /// Directory containing game metadata (title_id/meta.json).
     pub info_dir: String,
+    /// URL of the Mii generator server (e.g. "http://localhost:8080/miis/").
+    pub mii_generator_server: String,
 }
 
 impl Config {
@@ -50,6 +52,8 @@ impl Config {
                 .expect("ASSETS_BASE_URL must be set in .env"),
             info_dir: env::var("INFO_DIR")
                 .unwrap_or_else(|_| "activity_manager/info".to_string()),
+            mii_generator_server: env::var("MII_GENERATOR_SERVER")
+                .expect("MII_GENERATOR_SERVER must be set in .env"),
         }
     }
 }

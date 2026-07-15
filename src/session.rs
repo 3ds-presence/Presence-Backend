@@ -9,6 +9,7 @@ use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use activity_manager::UserInfo;
 use crate::{AppState, auth::Auth, crypto};
 use crate::response::error_response;
 
@@ -31,6 +32,7 @@ pub enum SessionState {
         last_counter: AtomicU64,
         last_activity: Instant,
         client_ip: IpAddr,
+        user_info: Option<UserInfo>,
     },
 }
 
@@ -40,9 +42,10 @@ impl std::fmt::Debug for SessionState {
             Self::PendingVerify { nonce, .. } => {
                 f.debug_struct("PendingVerify").field("nonce", nonce).finish()
             }
-            Self::Active { last_activity, .. } => {
+            Self::Active { last_activity, user_info, .. } => {
                 f.debug_struct("Active")
                     .field("last_activity", last_activity)
+                    .field("user_info", user_info)
                     .finish()
             }
         }
@@ -175,6 +178,7 @@ impl SessionManager {
         discord_rpc: &DiscordSocialRpc,
         access_token: &str,
         cooldown_secs: u64,
+        user_info: Option<UserInfo>,
     ) -> Result<u64, SessionError> {
         // Use remove_session_with_ip so the IP counter is decremented
         // even if verification fails after removal.
@@ -236,6 +240,7 @@ impl SessionManager {
             last_counter: AtomicU64::new(nonce),
             last_activity: Instant::now() - Duration::from_secs(cooldown_secs + 1),
             client_ip,
+            user_info,
         });
 
         Ok(nonce)
@@ -254,7 +259,7 @@ impl SessionManager {
             .ok_or_else(|| SessionError::SessionNotFound)?;
 
         let (client, aes_key, last_counter, last_activity, client_ip) = match session {
-            SessionState::Active { client, aes_key, last_counter, last_activity, client_ip } => {
+            SessionState::Active { client, aes_key, last_counter, last_activity, client_ip, .. } => {
                 (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity, *client_ip)
             }
             SessionState::PendingVerify { .. } => {
@@ -309,8 +314,17 @@ impl SessionManager {
 
         let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
 
+        // Get user_info from the session
+        let user_info = {
+            let sessions = self.sessions.lock().await;
+            match sessions.get(&auth.uuid) {
+                Some(SessionState::Active { user_info, .. }) => user_info.clone(),
+                _ => None,
+            }
+        };
+
         // Build the Activity and send it via spawn_blocking
-        let activity = state.game_db.build_activity(titleid).await;
+        let activity = state.game_db.build_activity(titleid, &user_info.unwrap_or_default()).await;
 
         let client_set = client.clone();
         tokio::task::spawn_blocking(move || {

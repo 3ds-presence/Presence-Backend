@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
+use activity_manager::UserInfo;
 use crate::auth::Auth;
 use crate::db;
 use crate::response::error_response;
@@ -13,6 +14,7 @@ use crate::AppState;
 pub struct LoginVerifyForm {
     pub uuid: String,
     pub cipher_hex: String,
+    pub mii: Option<String>,
 }
 
 /// POST /login/verify — Prove possession of the AES key.
@@ -29,9 +31,15 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
+    // Build optional UserInfo from the mii query parameter
+    let user_info = form.mii.map(|mii| UserInfo {
+        mii: Some(mii),
+        mii_name: None,
+    });
+
     // Verify the encrypted nonce and activate the session
     let nonce = state.session_manager
-        .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs)
+        .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs, user_info)
         .await
         .map_err(|e| {
             error_response(403, "auth_failed", &format!("Verification failed: {}", e))
