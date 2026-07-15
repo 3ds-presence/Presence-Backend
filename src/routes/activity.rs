@@ -13,7 +13,7 @@ use crate::AppState;
 pub struct ActivityForm {
     pub uuid: String,
     pub auth_hex: String,
-    pub titleid: String,
+    pub titleid: Option<String>,
 }
 
 /// POST /activity/set — Update the Discord activity.
@@ -21,16 +21,17 @@ pub async fn set_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    if form.titleid.is_empty() {
-        return Err(error_response(400, "missing_field", "titleid is required"));
-    }
+    let titleid = match &form.titleid {
+        Some(t) => t.clone(),
+        None => return Err(error_response(400, "missing_field", "titleid is required")),
+    };
 
-    if form.titleid.chars().count() != 16 {
+    if titleid.chars().count() != 16 {
         return Err(error_response(400, "invalid_titleid", "titleid must be exactly 16 characters long"));
     }
 
     let auth = Auth::new(&form.uuid, &form.auth_hex)?;
-    let titleid = form.titleid.as_str();
+    let titleid = titleid.as_str();
 
     state.session_manager
         .update_activity(&state, &auth, titleid)
