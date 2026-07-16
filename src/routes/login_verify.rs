@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
-use activity_manager::UserInfo;
+use activity_generator::UserInfo;
 use crate::auth::Auth;
 use crate::db;
 use crate::response::error_response;

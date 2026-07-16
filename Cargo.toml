@@ -1,12 +1,12 @@
 [package]
-name = "presence-server"
+name = "presence-backend"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Discord RPC library (local)
-discord_social_rpc = { path = "../discord_social_rpc" }
-activity_manager = { path = "../activity_manager" }
+# RPC library
+discord_social_rpc = "0.1.0"
+activity_generator = { path = "../activity_generator" }
 
 # HTTP server
 axum = "0.8"

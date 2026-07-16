@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "activity_manager"
+name = "activity_generator"
 version = "0.1.0"
 dependencies = [
  "discord_social_rpc",
@@ -713,6 +713,8 @@ dependencies = [
 [[package]]
 name = "discord_social_rpc"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0af114143dce2e878399a96dd8f1a90557c1d3709f3a6e46c4da8ada67e3779"
 dependencies = [
  "futures-util",
  "log",
@@ -722,7 +724,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
- "url",
 ]
 
 [[package]]
@@ -1951,10 +1952,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "presence-server"
+name = "presence-backend"
 version = "0.1.0"
 dependencies = [
- "activity_manager",
+ "activity_generator",
  "aes",
  "axum",
  "cbc",

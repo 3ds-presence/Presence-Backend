@@ -5,7 +5,7 @@ use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
 
-use activity_manager::GameDatabase;
+use activity_generator::GameDatabase;
 use discord_social_rpc::DiscordSocialRpcAdmin;
 
 mod auth;

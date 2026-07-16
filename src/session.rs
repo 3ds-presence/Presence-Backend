@@ -9,7 +9,7 @@ use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use activity_manager::UserInfo;
+use activity_generator::UserInfo;
 use crate::{AppState, auth::Auth, crypto};
 use crate::response::error_response;
 
