@@ -91,6 +91,26 @@ pub async fn update_user_tokens(
     Ok(())
 }
 
+/// Update the AES-256 key for a user.
+pub async fn update_user_aes_key(
+    db: &DatabaseConnection,
+    uuid: &Uuid,
+    new_aes_key: &[u8],
+) -> Result<(), DbErr> {
+    let user: Option<models::Model> = models::Entity::find()
+        .filter(models::Column::Uuid.eq(uuid.to_string()))
+        .one(db)
+        .await?;
+
+    if let Some(user) = user {
+        let mut active: models::ActiveModel = user.into();
+        active.aes_key = Set(new_aes_key.to_vec());
+        active.update(db).await?;
+    }
+
+    Ok(())
+}
+
 /// Get users whose token is about to expire (within the given margin in seconds).
 pub async fn get_users_needing_refresh(
     db: &DatabaseConnection,

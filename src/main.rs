@@ -92,6 +92,7 @@ async fn main() {
         .route("/activity/set", post(routes::activity::set_handler))
         .route("/activity/heartbeat", post(routes::activity::heartbeat_handler))
         .route("/logout", post(routes::logout::handler))
+        .route("/reset_aes", post(routes::reset_aes::handler))
         .with_state(state);
 
     // Start server
