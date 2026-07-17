@@ -17,6 +17,7 @@ mod response;
 mod routes;
 mod session;
 mod tasks;
+mod utils;
 
 use config::Config;
 use session::SessionManager;

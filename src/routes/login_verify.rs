@@ -32,9 +32,12 @@ pub async fn handler(
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
     // Build optional UserInfo from the mii query parameter
-    let user_info = form.mii.map(|mii| UserInfo {
-        mii: Some(mii),
-        mii_name: None,
+    let user_info = form.mii.map(|mii| {
+        let mii_name = crate::utils::mii_utils::get_mii_name(&mii).ok();
+        UserInfo {
+            mii: Some(mii),
+            mii_name,
+        }
     });
 
     // Verify the encrypted nonce and activate the session
