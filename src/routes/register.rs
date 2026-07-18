@@ -29,17 +29,18 @@ pub async fn handler(
     let redirect_uri = state.config.redirect_uri.clone();
     let discord_rpc = state.discord_rpc.clone();
     
+    let debug = state.config.debug_mode;
     let token_resp =
         tokio::task::spawn_blocking(move || discord_rpc.exchange_code(&code, &redirect_uri))
             .await
             .map_err(|e| {
-                error_response(
-                    500,
-                    "runtime_error",
-                    &format!("Spawn blocking failed: {}", e),
-                )
+                let msg = if debug { format!("Spawn blocking failed: {}", e) } else { "Internal error".to_string() };
+                error_response(500, "runtime_error", &msg)
             })?
-            .map_err(|e| error_response(502, "discord_error", &format!("Discord error: {}", e)))?;
+            .map_err(|e| {
+                let msg = if debug { format!("Discord error: {}", e) } else { "Discord authentication failed".to_string() };
+                error_response(502, "discord_error", &msg)
+            })?;
 
     // Fetch the Discord user's identity (to get their snowflake ID)
     let client = reqwest::Client::new();

@@ -4,10 +4,9 @@ use activity_generator::info::GameInfo;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
-use axum::response::IntoResponse;
-
 use crate::auth::Auth;
 use crate::response::{error_response, success_response};
+use crate::session::session_error_into_response;
 use crate::AppState;
 
 #[derive(Deserialize, Debug, Default)]
@@ -47,7 +46,7 @@ pub async fn set_handler(
     state.session_manager
         .update_activity(&state, &auth, game_info)
         .await
-        .map_err(|e| e.into_response())?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
     Ok(success_response("success=true"))
 }
@@ -62,7 +61,7 @@ pub async fn heartbeat_handler(
     state.session_manager
         .heartbeat(&auth, state.config.activity_cooldown_secs)
         .await
-        .map_err(|e| e.into_response())?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
     Ok(success_response("success=true"))
 }

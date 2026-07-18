@@ -3,10 +3,9 @@ use std::sync::Arc;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
-use axum::response::IntoResponse;
-
 use crate::auth::Auth;
 use crate::response::success_response;
+use crate::session::session_error_into_response;
 use crate::AppState;
 
 #[derive(Deserialize, Debug, Default)]
@@ -26,7 +25,7 @@ pub async fn handler(
     state.session_manager
         .stop_activity(&auth, 0)
         .await
-        .map_err(|e| e.into_response())?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
     Ok(success_response("success=true"))
 }

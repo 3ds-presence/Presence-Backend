@@ -428,3 +428,33 @@ impl SessionState {
         }
     }
 }
+
+/// Convert a SessionError into an HTTP response, masking internal details
+/// when debug mode is disabled (production).
+pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
+    match err {
+        // Use the same message for both cases → no oracle, can't distinguish
+        // "session not found" from "pending" from "already active"
+        SessionError::SessionNotFound | SessionError::PendingNotActive => {
+            error_response(401, "session_expired", "Session expired or not found. Please re-login.")
+        }
+        // Critical: do NOT leak padding/integrity distinction → blocks padding oracle
+        SessionError::AuthFailed(_) => {
+            let msg = if debug { err.to_string() } else { "Authentication failed".to_string() };
+            error_response(403, "auth_failed", &msg)
+        }
+        // Do not leak the counter values
+        SessionError::ReplayDetected { .. } => {
+            let msg = if debug { err.to_string() } else { "Replay detected".to_string() };
+            error_response(403, "replay_detected", &msg)
+        }
+        // Cooldown seconds are useful for the client to know how long to wait
+        SessionError::Cooldown { remaining } => {
+            error_response(429, "cooldown", &format!("Wait {} seconds", remaining))
+        }
+        SessionError::Other(msg) => {
+            let msg = if debug { msg } else { "Request failed".to_string() };
+            error_response(400, "error", &msg)
+        }
+    }
+}

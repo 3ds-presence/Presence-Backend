@@ -23,6 +23,8 @@ pub struct Config {
     pub script_dir: String,
     /// URL of the Mii generator server (e.g. "http://localhost:8080/miis/").
     pub mii_generator_server: String,
+    /// Whether to expose detailed error messages (set to true when RUST_LOG=debug).
+    pub debug_mode: bool,
 }
 
 impl Config {
@@ -54,6 +56,9 @@ impl Config {
                 .unwrap_or_else(|_| "activity_manager/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
+            debug_mode: env::var("RUST_LOG")
+                .map(|v| v.to_lowercase().contains("debug"))
+                .unwrap_or(false),
         }
     }
 }

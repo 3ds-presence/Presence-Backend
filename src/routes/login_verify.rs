@@ -9,6 +9,7 @@ use crate::db;
 use crate::response::error_response;
 use crate::response::success_response;
 use crate::AppState;
+use crate::session::session_error_into_response;
 
 #[derive(Deserialize)]
 pub struct LoginVerifyForm {
@@ -44,9 +45,7 @@ pub async fn handler(
     let nonce = state.session_manager
         .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs, user_info)
         .await
-        .map_err(|e| {
-            error_response(403, "auth_failed", &format!("Verification failed: {}", e))
-        })?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
     let body = format!("success=true&nonce={}", nonce);
 
