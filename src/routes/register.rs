@@ -24,10 +24,22 @@ pub async fn handler(
         return Err(error_response(400, "missing_code", "Code is required"));
     }
 
-    // Exchange the code with Discord for tokens via DiscordSocialRpcAdmin
-    let token_resp = state.discord_rpc
-        .exchange_code(&form.code, &state.config.redirect_uri)
-        .map_err(|e| error_response(502, "discord_error", &format!("Discord error: {}", e)))?;
+    // Exchange the code with Discord for tokens via DiscordSocialRpcAdmin.
+    let code = form.code.clone();
+    let redirect_uri = state.config.redirect_uri.clone();
+    let discord_rpc = state.discord_rpc.clone();
+    
+    let token_resp =
+        tokio::task::spawn_blocking(move || discord_rpc.exchange_code(&code, &redirect_uri))
+            .await
+            .map_err(|e| {
+                error_response(
+                    500,
+                    "runtime_error",
+                    &format!("Spawn blocking failed: {}", e),
+                )
+            })?
+            .map_err(|e| error_response(502, "discord_error", &format!("Discord error: {}", e)))?;
 
     // Fetch the Discord user's identity (to get their snowflake ID)
     let client = reqwest::Client::new();

@@ -57,9 +57,20 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
 }
 
 /// Refresh a single user's Discord OAuth2 token using DiscordSocialRpcAdmin.
+/// The underlying RPC call is synchronous (uses `block_on` internally), so we
+/// wrap it in `spawn_blocking` to avoid panicking when called from an async
+/// tokio runtime context.
 async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model, admin: &DiscordSocialRpcAdmin) {
-    match admin.refresh_user_token(&user.refresh_token) {
-        Ok(resp) => {
+    let admin = admin.clone();
+    let refresh_token = user.refresh_token.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        admin.refresh_user_token(&refresh_token)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(resp)) => {
             let now = crate::crypto::now_secs();
             let expires_at = now + resp.expires_in as i64;
             let new_refresh = resp.refresh_token.unwrap_or(user.refresh_token.clone());
@@ -83,6 +94,9 @@ async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model
             } else {
                 info!("token_refresh: refreshed tokens for {}", user.uuid);
             }
+        }
+        Ok(Err(e)) => {
+            warn!("token_refresh: error for {}: {}", user.uuid, e);
         }
         Err(e) => {
             warn!("token_refresh: error for {}: {}", user.uuid, e);
