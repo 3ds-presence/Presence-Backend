@@ -42,12 +42,10 @@ pub async fn handler(
     });
 
     // Verify the encrypted nonce and activate the session
-    let nonce = state.session_manager
+    state.session_manager
         .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs, user_info)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
-    let body = format!("success=true&nonce={}", nonce);
-
-    Ok(success_response(body))
+    Ok(success_response("success=true"))
 }
