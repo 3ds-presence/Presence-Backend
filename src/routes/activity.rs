@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use activity_generator::info::GameInfo;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
@@ -14,6 +15,8 @@ pub struct ActivityForm {
     pub uuid: String,
     pub auth_hex: String,
     pub titleid: Option<String>,
+    pub name: Option<String>,
+    pub publisher: Option<String>,
 }
 
 /// POST /activity/set — Update the Discord activity.
@@ -30,11 +33,19 @@ pub async fn set_handler(
         return Err(error_response(400, "invalid_titleid", "titleid must be exactly 16 characters long"));
     }
 
+    if form.name.is_none() || form.publisher.is_none() {
+        return Err(error_response(400, "missing_field", "name and publisher are required"));
+    }
+
     let auth = Auth::new(&form.uuid, &form.auth_hex)?;
-    let titleid = titleid.as_str();
+    let game_info = GameInfo {
+        title_id: titleid,
+        name: form.name.clone().unwrap_or_default(),
+        publisher: form.publisher.clone().unwrap_or_default(),
+    };
 
     state.session_manager
-        .update_activity(&state, &auth, titleid)
+        .update_activity(&state, &auth, game_info)
         .await
         .map_err(|e| e.into_response())?;
 

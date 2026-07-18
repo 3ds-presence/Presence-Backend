@@ -19,8 +19,8 @@ pub struct Config {
     pub listen_addr: String,
     /// Base URL for game icon images (e.g. "http://localhost:8080/imgs/").
     pub assets_base_url: String,
-    /// Directory containing game metadata (title_id/meta.json).
-    pub info_dir: String,
+    /// Directory containing game scripts (title_id/script.lua).
+    pub script_dir: String,
     /// URL of the Mii generator server (e.g. "http://localhost:8080/miis/").
     pub mii_generator_server: String,
 }
@@ -50,8 +50,8 @@ impl Config {
                 .unwrap_or_else(|_| "0.0.0.0:5555".to_string()),
             assets_base_url: env::var("ASSETS_BASE_URL")
                 .expect("ASSETS_BASE_URL must be set in .env"),
-            info_dir: env::var("INFO_DIR")
-                .unwrap_or_else(|_| "activity_manager/info".to_string()),
+            script_dir: env::var("SCRIPT_DIR")
+                .unwrap_or_else(|_| "activity_manager/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
         }

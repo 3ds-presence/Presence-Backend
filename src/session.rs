@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use activity_generator::info::GameInfo;
 use axum::response::{IntoResponse, Response};
 use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
@@ -307,9 +308,9 @@ impl SessionManager {
         &self,
         state: &AppState,
         auth: &Auth,
-        titleid: &str,
+        game_info: GameInfo,
     ) -> Result<(), SessionError> {
-        let field = format!("titleid={}", titleid);
+        let field = format!("titleid={}&name={}&publisher={}", game_info.title_id, game_info.name, game_info.publisher);
         let fields = [field.as_str()];
 
         let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
@@ -324,7 +325,7 @@ impl SessionManager {
         };
 
         // Build the Activity and send it via spawn_blocking
-        let activity = state.game_db.build_activity(titleid, &user_info.unwrap_or_default()).await;
+        let activity = state.activity_generator.build_activity(&user_info.unwrap_or_default(), &game_info).await;
 
         let client_set = client.clone();
         tokio::task::spawn_blocking(move || {
