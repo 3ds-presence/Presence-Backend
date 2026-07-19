@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use activity_generator::UserInfo;
+use crate::crypto::url_encode_3ds;
 use crate::{AppState, auth::Auth, crypto};
 use crate::response::error_response;
 
@@ -310,7 +311,9 @@ impl SessionManager {
         auth: &Auth,
         game_info: GameInfo,
     ) -> Result<(), SessionError> {
-        let field = format!("titleid={}&name={}&publisher={}", game_info.title_id, game_info.name, game_info.publisher);
+        // URL-encode name and publisher exactly like the 3DS does,
+        // so the SHA256 hash in the auth matches what the client computed.
+        let field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
         let fields = [field.as_str()];
 
         let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;

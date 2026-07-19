@@ -127,6 +127,24 @@ pub fn verify_activity_auth(
     Ok(counter)
 }
 
+/// URL-encode a string exactly like the 3DS does (used for auth hash consistency).
+///
+/// Rules:
+/// - `[a-zA-Z0-9._~-]` → unchanged
+/// - ` ` (space) → `+`
+/// - all other bytes → `%XX` with uppercase hex
+pub fn url_encode_3ds(s: &str) -> String {
+    let mut out = String::new();
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 /// Get the current Unix timestamp in seconds.
 pub fn now_secs() -> i64 {
     SystemTime::now()
