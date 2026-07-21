@@ -310,10 +310,17 @@ impl SessionManager {
         state: &AppState,
         auth: &Auth,
         game_info: GameInfo,
+        extra_info: Option<String>,
     ) -> Result<(), SessionError> {
         // URL-encode name and publisher exactly like the 3DS does,
         // so the SHA256 hash in the auth matches what the client computed.
-        let field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
+        let mut field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
+
+        if extra_info.is_some() {
+            log::info!("session {}: extra info provided: {:?}", auth.uuid, extra_info);
+            field = format!("{}&extra={}", field, url_encode_3ds(extra_info.unwrap().as_str()));
+        }
+
         let fields = [field.as_str()];
 
         let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
@@ -328,7 +335,7 @@ impl SessionManager {
         };
 
         // Build the Activity and send it via spawn_blocking
-        let activity = state.activity_generator.build_activity(&user_info.unwrap_or_default(), &game_info).await;
+        let activity = state.activity_generator.build_activity(&user_info.unwrap_or_default(), &game_info, &extra_info).await;
 
         let client_set = client.clone();
         tokio::task::spawn_blocking(move || {

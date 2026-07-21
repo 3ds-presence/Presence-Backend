@@ -16,6 +16,7 @@ pub struct ActivityForm {
     pub titleid: Option<String>,
     pub name: Option<String>,
     pub publisher: Option<String>,
+    pub extra: Option<String>,
 }
 
 /// POST /activity/set — Update the Discord activity.
@@ -44,7 +45,7 @@ pub async fn set_handler(
     };
 
     state.session_manager
-        .update_activity(&state, &auth, game_info)
+        .update_activity(&state, &auth, game_info, form.extra)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
