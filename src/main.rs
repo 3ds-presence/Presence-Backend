@@ -58,7 +58,7 @@ async fn main() {
     let session_manager = Arc::new(SessionManager::new());
 
     // Initialize activity generator (in-memory catalogue of game metadata)
-    let activity_generator = ActivityGenerator::new(&config.script_dir, &config.assets_base_url, &config.mii_generator_server);
+    let activity_generator = ActivityGenerator::new(&config.scripts_dir, &config.assets_base_url, &config.mii_generator_server, config.lua_pool_max);
 
     // Create shared state
     let state = Arc::new(AppState {

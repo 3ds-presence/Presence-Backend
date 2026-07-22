@@ -316,9 +316,9 @@ impl SessionManager {
         // so the SHA256 hash in the auth matches what the client computed.
         let mut field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
 
-        if extra_info.is_some() {
+        if let Some(extra) = &extra_info {
             log::info!("session {}: extra info provided: {:?}", auth.uuid, extra_info);
-            field = format!("{}&extra={}", field, url_encode_3ds(extra_info.unwrap().as_str()));
+            field = format!("{}&extra={}", field, url_encode_3ds(extra.as_str()));
         }
 
         let fields = [field.as_str()];
