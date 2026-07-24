@@ -32,9 +32,7 @@ pub struct ResetAesForm {
     pub aes_key_hex: String,
 }
 
-/// POST /reset_aes — Reset the AES-256 key for an account.
-/// Takes the current AES key in plain hex to authorize the operation.
-/// Returns the new AES key.
+/// POST /reset_aes — Reset the AES-256 key (authorized by providing the current key).
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ResetAesForm>,
@@ -42,22 +40,18 @@ pub async fn handler(
     let uuid = validation::validate_uuid(&form.uuid)?;
     validation::validate_aes_key_hex(&form.aes_key_hex)?;
 
-    // Look up user in database
     let user = db::get_user_by_uuid(&state.db, &uuid)
         .await
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    // Verify the provided AES key matches the stored one
     let current_hex = hex::encode(&user.aes_key);
     if current_hex != form.aes_key_hex {
         return Err(error_response(403, "auth_failed", "AES key does not match"));
     }
 
-    // Generate a new AES key
     let new_key = crypto::generate_aes_key();
 
-    // Update in database
     db::update_user_aes_key(&state.db, &uuid, &new_key)
         .await
         .map_err(|_e| error_response(500, "db_error", "Failed to update AES key"))?;

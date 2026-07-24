@@ -33,7 +33,6 @@ pub struct LoginForm {
 }
 
 /// POST /login — Start the authentication challenge.
-/// Returns a nonce that the client must encrypt with AES to prove identity.
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -41,26 +40,22 @@ pub async fn handler(
 ) -> Result<axum::response::Response, axum::response::Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
 
-    // Look up user in database
     let user = db::get_user_by_uuid(&state.db, &uuid)
         .await
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    // Convert aes_key from DB to [u8; 32]
     if user.aes_key.len() != 32 {
         return Err(error_response(500, "crypto_error", "Invalid AES key in database"));
     }
     let mut aes_key = [0u8; 32];
     aes_key.copy_from_slice(&user.aes_key);
 
-    // Extract real client IP from headers set by reverse proxy
     let client_ip = extract_real_ip(&headers)
         .map_err(|e| error_response(400, "missing_ip", e))?;
 
     info!("Login request for UUID {} from IP {}", uuid, client_ip);
 
-    // Create pending session with nonce challenge
     let nonce = state.session_manager
         .create_pending(uuid, aes_key, client_ip, state.config.max_clients_per_ip)
         .await
@@ -71,16 +66,9 @@ pub async fn handler(
     Ok(success_response(body))
 }
 
-/// Extract the real client IP address from request headers set by the
-/// reverse proxy (nginx).
-///
-/// Priority:
-/// 1. `X-Real-IP` (set by the reverse proxy)
-/// 2. `X-Forwarded-For` (first IP in the comma-separated list, fallback)
-///
-/// Returns an error if no valid IP header is found.
+/// Extract client IP from reverse proxy headers (X-Real-IP, then X-Forwarded-For).
 fn extract_real_ip(headers: &HeaderMap) -> Result<IpAddr, &'static str> {
-    // 1. Try X-Real-IP (set by the reverse proxy)
+    // Try X-Real-IP first
     if let Some(value) = headers.get("x-real-ip") {
         if let Ok(s) = value.to_str() {
             if let Ok(ip) = s.parse::<IpAddr>() {
@@ -89,7 +77,7 @@ fn extract_real_ip(headers: &HeaderMap) -> Result<IpAddr, &'static str> {
         }
     }
 
-    // 2. Fallback to X-Forwarded-For (first IP in the list)
+    // Fallback to X-Forwarded-For
     if let Some(value) = headers.get("x-forwarded-for") {
         if let Ok(s) = value.to_str() {
             if let Some(first) = s.split(',').next() {
@@ -100,6 +88,5 @@ fn extract_real_ip(headers: &HeaderMap) -> Result<IpAddr, &'static str> {
         }
     }
 
-    // No valid IP found in any header
     Err("Could not determine client IP address")
 }

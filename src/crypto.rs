@@ -17,7 +17,6 @@
 
 use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 use rand::RngExt;
-use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,9 +50,7 @@ impl std::fmt::Display for CryptoError {
 
 /// Generate a random AES-256 key using OS entropy.
 pub fn generate_aes_key() -> [u8; AES_KEY_LEN] {
-    let mut key = [0u8; AES_KEY_LEN];
-    rand::rng().fill_bytes(&mut key);
-    key
+    rand::rng().random()
 }
 
 /// Generate a random nonce (u64) using OS entropy.
@@ -61,10 +58,8 @@ pub fn generate_nonce() -> u64 {
     rand::rng().random()
 }
 
-/// Decrypt AES-256-CBC with IV=0 and remove PKCS7 padding.
-///
-/// Used for both login verify (16-byte ciphertext) and activity auth (48-byte ciphertext).
-/// Returns the unpadded plaintext.
+/// AES-256-CBC decrypt with IV=0 and PKCS7 unpadding.
+/// Used for login verify (16-byte input) and activity auth (48-byte input).
 pub fn decrypt_aes_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, CryptoError> {
     let iv = [0u8; 16];
     let mut buf = ciphertext.to_vec();
@@ -76,10 +71,7 @@ pub fn decrypt_aes_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Cry
     Ok(pt.to_vec())
 }
 
-/// Calculate SHA-256 of concatenated fields in a fixed order.
-///
-/// Fields are concatenated as raw UTF-8 bytes without delimiters.
-/// Empty fields are skipped.
+/// SHA-256 of concatenated fields (raw UTF-8, no delimiter).
 pub fn sha256_fields(fields: &[&str]) -> [u8; SHA256_LEN] {
     let mut hasher = Sha256::new();
     for field in fields {
@@ -97,14 +89,8 @@ pub fn u64_from_be_bytes(bytes: &[u8]) -> u64 {
     u64::from_be_bytes(arr)
 }
 
-/// Verify the auth token for an activity request.
-///
-/// Parameters:
-/// - `auth_hex`: hex-encoded AES-256-CBC ciphertext (48 bytes = 96 hex chars)
-/// - `counter`: the claimed counter value (must be > last_counter for replay protection)
-/// - `fields`: the activity fields (state, details, activity_type as strings)
-/// - `key`: the user's AES-256 key
-///
+/// Verify an activity auth token: decrypt AES-CBC, check counter (replay protection),
+/// and verify SHA-256 of the fields matches.
 /// Returns the counter on success.
 pub fn verify_activity_auth(
     auth_hex: &str,
@@ -112,7 +98,6 @@ pub fn verify_activity_auth(
     fields: &[&str],
     key: &[u8; 32],
 ) -> Result<u64, CryptoError> {
-    // Decode hex
     let ciphertext = hex::decode(auth_hex)
         .map_err(|_| CryptoError::InvalidHex)?;
 
@@ -120,21 +105,17 @@ pub fn verify_activity_auth(
         return Err(CryptoError::WrongInputSize);
     }
 
-    // Decrypt
     let plaintext = decrypt_aes_cbc(&ciphertext, key)?;
 
-    // Expected: counter (8 bytes) || hash (32 bytes) = 40 bytes + 8 padding = 48
     if plaintext.len() != 40 {
         return Err(CryptoError::PaddingInvalid);
     }
 
-    // Extract counter
     let extracted_counter = u64_from_be_bytes(&plaintext[..8]);
     if extracted_counter != counter {
         return Err(CryptoError::IntegrityMismatch);
     }
 
-    // Verify hash
     let expected_hash = sha256_fields(fields);
     let actual_hash = &plaintext[8..40];
     if actual_hash != expected_hash {
@@ -144,12 +125,7 @@ pub fn verify_activity_auth(
     Ok(counter)
 }
 
-/// URL-encode a string exactly like the 3DS does (used for auth hash consistency).
-///
-/// Rules:
-/// - `[a-zA-Z0-9._~-]` → unchanged
-/// - ` ` (space) → `+`
-/// - all other bytes → `%XX` with uppercase hex
+/// URL-encode matching the 3DS client: unreserved chars kept, space → `+`, rest → `%XX`.
 pub fn url_encode_3ds(s: &str) -> String {
     let mut out = String::new();
     for &b in s.as_bytes() {

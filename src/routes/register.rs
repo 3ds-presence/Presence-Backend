@@ -38,7 +38,6 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<RegisterForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    // Exchange the code with Discord for tokens via DiscordSocialRpcAdmin.
     let code = validation::validate_code(&form.code)?.to_owned();
     let redirect_uri = state.config.redirect_uri.clone();
     let discord_rpc = state.discord_rpc.clone();
@@ -56,7 +55,7 @@ pub async fn handler(
                 error_response(502, "discord_error", &msg)
             })?;
 
-    // Fetch the Discord user's identity (to get their snowflake ID)
+    // Fetch Discord user identity to get their snowflake ID
     let client = reqwest::Client::new();
     let user_resp = client
         .get("https://discord.com/api/v10/users/@me")
@@ -106,7 +105,7 @@ pub async fn handler(
         return Ok(success_response(body));
     }
 
-    // New user: generate a fresh UUID and AES key
+    // New user: generate fresh UUID and AES key
     let uuid = Uuid::new_v4();
     let aes_key = crypto::generate_aes_key();
 

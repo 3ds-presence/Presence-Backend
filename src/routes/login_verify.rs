@@ -36,8 +36,7 @@ pub struct LoginVerifyForm {
     pub mii: Option<String>,
 }
 
-/// POST /login/verify — Prove possession of the AES key.
-/// The client encrypts the nonce received from /login and sends it back.
+/// POST /login/verify — Prove AES key possession by encrypting the nonce.
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LoginVerifyForm>,
@@ -48,13 +47,11 @@ pub async fn handler(
 
     let auth = Auth::from_uuid(uuid, cipher_hex.to_string());
 
-    // Get user from DB for access_token
     let user = db::get_user_by_uuid(&state.db, &auth.uuid)
         .await
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    // Build optional UserInfo from the mii query parameter
     let user_info = mii.map(|mii| {
         let mii_name = crate::utils::mii_utils::get_mii_name(&mii).ok();
         UserInfo {
@@ -63,7 +60,6 @@ pub async fn handler(
         }
     });
 
-    // Verify the encrypted nonce and activate the session
     state.session_manager
         .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs, user_info)
         .await

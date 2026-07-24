@@ -125,7 +125,7 @@ impl From<String> for SessionError {
     }
 }
 
-/// Manages all active sessions (both pending and active).
+/// Manages all active and pending sessions, with IP-based rate limiting.
 pub struct SessionManager {
     sessions: Mutex<HashMap<Uuid, SessionState>>,
     ip_counts: Mutex<HashMap<IpAddr, usize>>,
@@ -199,8 +199,7 @@ impl SessionManager {
         cooldown_secs: u64,
         user_info: Option<UserInfo>,
     ) -> Result<u64, SessionError> {
-        // Use remove_session_with_ip so the IP counter is decremented
-        // even if verification fails after removal.
+        // Remove pending session first (IP counter will be decremented on failure too)
         let state = self.remove_session_with_ip(&auth.uuid).await
             .ok_or_else(|| SessionError::from("no pending session for this uuid"))?;
 
@@ -211,7 +210,7 @@ impl SessionManager {
             }
         };
 
-        // Decode the ciphertext (32 hex chars = 16 bytes)
+        // Decrypt nonce: 16 bytes ciphertext → 8 bytes nonce + PKCS7 padding
         let cipher_bytes = hex::decode(auth.hex())
             .map_err(|_| SessionError::from("invalid hex in cipher_hex"))?;
         if cipher_bytes.len() != 16 {
@@ -220,30 +219,23 @@ impl SessionManager {
         let mut cipher_arr = [0u8; 16];
         cipher_arr.copy_from_slice(&cipher_bytes);
 
-        // Decrypt. decrypt_block uses PKCS7 internally and returns only the
-        // unpadded plaintext (8 bytes = the nonce). If padding was invalid,
-        // it returns CryptoError::PaddingInvalid.
         let plaintext = crypto::decrypt_aes_cbc(&cipher_arr, &aes_key)
             .map_err(|e| SessionError::from(format!("decryption failed: {}", e)))?;
 
-        // plaintext should be exactly 8 bytes (nonce) + padding removed
         if plaintext.len() < 8 {
             return Err("decrypted data too short".into());
         }
 
-        // Extract nonce
         let extracted_nonce = crypto::u64_from_be_bytes(&plaintext[..8]);
         if extracted_nonce != nonce {
             return Err("nonce mismatch".into());
         }
 
-        // Create the Discord RPC client
         let client = discord_rpc.create_new_client(access_token)
             .map_err(|e| SessionError::from(format!("failed to create Discord client: {}", e)))?;
 
         let client = Arc::new(client);
 
-        // Start the gateway in a blocking thread
         let client_clone = client.clone();
         tokio::task::spawn_blocking(move || {
             let _ = client_clone.start_activity();
@@ -251,7 +243,6 @@ impl SessionManager {
 
         log::info!("session {}: Discord client created and gateway started", auth.uuid);
 
-        // Store active session
         let mut sessions = self.sessions.lock().await;
         sessions.insert(auth.uuid, SessionState::Active {
             client,
@@ -286,13 +277,11 @@ impl SessionManager {
             }
         };
 
-        // Check cooldown
         let elapsed = last_activity.elapsed().as_secs();
         if elapsed < cooldown_secs {
             return Err(SessionError::Cooldown { remaining: cooldown_secs - elapsed });
         }
 
-        // Verify auth
         let good_counter = last_counter + 1;
         crypto::verify_activity_auth(auth.hex(), good_counter, fields, &aes_key)
             .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
@@ -311,7 +300,6 @@ impl SessionManager {
         let (client, _client_ip, good_counter) =
             self.authenticate_and_get_client(auth, fields, cooldown_secs).await?;
 
-        // Second quick lock to update counter and last_activity
         let mut sessions = self.sessions.lock().await;
         if let Some(SessionState::Active { last_counter, last_activity, .. }) = sessions.get_mut(&auth.uuid) {
             last_counter.store(good_counter, Ordering::SeqCst);
@@ -329,8 +317,6 @@ impl SessionManager {
         game_info: GameInfo,
         extra_info: Option<String>,
     ) -> Result<(), SessionError> {
-        // URL-encode name and publisher exactly like the 3DS does,
-        // so the SHA256 hash in the auth matches what the client computed.
         let mut field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
 
         if let Some(extra) = &extra_info {
@@ -342,7 +328,6 @@ impl SessionManager {
 
         let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
 
-        // Get user_info from the session
         let user_info = {
             let sessions = self.sessions.lock().await;
             match sessions.get(&auth.uuid) {
@@ -351,7 +336,6 @@ impl SessionManager {
             }
         };
 
-        // Build the Activity and send it via spawn_blocking
         let activity = state.activity_generator.build_activity(&user_info.unwrap_or_default(), &game_info, &extra_info).await;
 
         let client_set = client.clone();
@@ -380,20 +364,16 @@ impl SessionManager {
         auth: &Auth,
         cooldown_secs: u64,
     ) -> Result<(), SessionError> {
-        // Fields for logout: use ["logout","",""] as the auth payload
         let fields = ["logout", "", ""];
 
-        // Verify the session is active and auth is valid
         let (client, _client_ip, _good_counter) =
             self.authenticate_and_get_client(auth, &fields, cooldown_secs).await?;
 
-        // Stop the activity
         let client_stop = client.clone();
         tokio::task::spawn_blocking(move || {
             let _ = client_stop.stop_activity();
         }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
 
-        // Remove the session and decrement IP count
         self.remove_session_with_ip(&auth.uuid).await;
         log::info!("session {}: activity stopped by client (logout)", auth.uuid);
 
@@ -460,22 +440,21 @@ impl SessionState {
 /// when debug mode is disabled (production).
 pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
     match err {
-        // Use the same message for both cases → no oracle, can't distinguish
-        // "session not found" from "pending" from "already active"
+        // Same message for both cases → no oracle, can't distinguish session states
         SessionError::SessionNotFound | SessionError::PendingNotActive => {
             error_response(401, "session_expired", "Session expired or not found. Please re-login.")
         }
-        // Critical: do NOT leak padding/integrity distinction → blocks padding oracle
+        // Do NOT leak padding/integrity distinction → blocks padding oracle
         SessionError::AuthFailed(_) => {
             let msg = if debug { err.to_string() } else { "Authentication failed".to_string() };
             error_response(403, "auth_failed", &msg)
         }
-        // Do not leak the counter values
+        // Do not leak counter values
         SessionError::ReplayDetected { .. } => {
             let msg = if debug { err.to_string() } else { "Replay detected".to_string() };
             error_response(403, "replay_detected", &msg)
         }
-        // Cooldown seconds are useful for the client to know how long to wait
+        // Cooldown remaining is useful for the client
         SessionError::Cooldown { remaining } => {
             error_response(429, "cooldown", &format!("Wait {} seconds", remaining))
         }

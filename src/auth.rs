@@ -21,8 +21,8 @@ use crate::response::{error_response, AppError};
 
 /// A validated authentication pair: UUID + hex string (auth_hex or cipher_hex).
 ///
-/// Creating an `Auth` via `Auth::new(...)` validates that the UUID is well-formed.
-/// All functions that need both `uuid` and `auth_hex`/`cipher_hex` should accept `&Auth`
+/// Creating via `Auth::new` validates the UUID format.
+/// Functions that need both `uuid` and `hex` should accept `&Auth`
 /// to guarantee the data has already been validated.
 #[derive(Debug, Clone)]
 pub struct Auth {
@@ -31,14 +31,12 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Create a new `Auth` from a pre-validated UUID and hex string (no re-parsing).
+    /// Create from a pre-validated UUID and hex string (no re-parsing).
     pub fn from_uuid(uuid: Uuid, hex: String) -> Self {
         Self { uuid, hex }
     }
 
-    /// Create a new `Auth` from raw uuid and hex strings.
-    ///
-    /// Returns an error response (400) if the UUID is not valid.
+    /// Parse and validate raw uuid/hex strings. Returns 400 if UUID is invalid.
     pub fn new(uuid_str: &str, hex: &str) -> Result<Self, AppError> {
         if uuid_str.is_empty() || hex.is_empty() {
             return Err(AppError(Box::new(error_response(400, "missing_field", "uuid and hex are required"))));

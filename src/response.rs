@@ -17,34 +17,33 @@
 
 use axum::response::Response;
 
-/// Thin wrapper around a boxed `axum::response::Response` to keep the
-/// `Err`-variant small and avoid clippy::result_large_err.
+/// Thin wrapper around a boxed `Response` to keep the `Err`-variant small
+/// and avoid clippy::result_large_err.
 #[derive(Debug)]
 pub struct AppError(pub Box<Response>);
 
-/// Convert `AppError` back into an `axum::response::Response` automatically
-/// so the `?` operator works in handlers returning `Result<_, Response>`.
+/// Convert AppError into an axum response for use with the `?` operator.
 impl From<AppError> for Response {
     fn from(err: AppError) -> Self {
         *err.0
     }
 }
 
-/// Build a 200 success response with form-urlencoded body.
+/// Build a 200 response with form-urlencoded body.
 pub fn success_response(body: impl Into<String>) -> Response {
     Response::builder()
         .status(200)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.into().into())
-        .unwrap()
+        .expect("static response should build")
 }
 
-/// Build an error response with form-urlencoded body.
+/// Build a form-urlencoded error response.
 pub fn error_response(status: u16, code: &str, message: &str) -> Response {
     let body = format!("error={}&message={}", code, urlencoding::encode(message));
     Response::builder()
         .status(status)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.into())
-        .unwrap()
+        .expect("static response should build")
 }

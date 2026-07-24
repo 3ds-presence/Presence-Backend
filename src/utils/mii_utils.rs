@@ -35,9 +35,7 @@ impl fmt::Display for MiiError {
 }
 
 /// Extracts the Mii name from a hex-encoded Mii data buffer.
-///
-/// The name is stored at offset 0x1A as UTF-16LE encoded bytes,
-/// max 10 characters, null-terminated (20 bytes total).
+/// Name is at offset 0x1A as UTF-16LE, max 10 chars, null-terminated (20 bytes).
 pub fn get_mii_name(hex_data: &str) -> Result<String, MiiError> {
     let bytes = hex::decode(hex_data).map_err(|e| MiiError::HexDecode(e.to_string()))?;
 
@@ -52,6 +50,9 @@ pub fn get_mii_name(hex_data: &str) -> Result<String, MiiError> {
 
     let mut name_utf16 = Vec::new();
     for chunk in name_bytes.chunks(2) {
+        if chunk.len() < 2 {
+            break;
+        }
         let code_unit = u16::from_le_bytes([chunk[0], chunk[1]]);
         if code_unit == 0 {
             break;

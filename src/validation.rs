@@ -19,46 +19,37 @@ use uuid::Uuid;
 
 use crate::response::{error_response, AppError};
 
-// ---------------------------------------------------------------------------
-//  Size limits
-// ---------------------------------------------------------------------------
-
-/// Maximum length of a UUID string (36 chars, e.g. "550e8400-e29b-41d4-a716-446655440000").
+/// Max length of a UUID string (36 chars).
 pub const UUID_MAX_LEN: usize = 36;
 
-/// Expected length of an auth_hex string: 48 bytes AES-CBC ciphertext → 96 hex chars.
+/// Expected length of auth_hex: 48 bytes → 96 hex chars.
 pub const AUTH_HEX_LEN: usize = 96;
 
-/// Expected length of a cipher_hex string: 16 bytes AES-CBC ciphertext → 32 hex chars.
+/// Expected length of cipher_hex: 16 bytes → 32 hex chars.
 pub const CIPHER_HEX_LEN: usize = 32;
 
-/// Expected length of an AES key hex string: 32 bytes → 64 hex chars.
+/// Expected length of AES key hex: 32 bytes → 64 hex chars.
 pub const AES_KEY_HEX_LEN: usize = 64;
 
-/// Expected length of a title ID: 16 hex chars (e.g. "0004000000148900").
+/// Expected length of a title ID: 16 hex chars.
 pub const TITLEID_LEN: usize = 16;
 
-/// Maximum length of a game name (SMDH long description, buffer name[512]).
+/// Max length of a game name (512 chars).
 pub const NAME_MAX_LEN: usize = 512;
 
-/// Maximum length of a publisher name (SMDH publisher, buffer publisher[256]).
+/// Max length of a publisher name (256 chars).
 pub const PUBLISHER_MAX_LEN: usize = 256;
 
-/// Maximum length of extra data (CUSTOMRPC_EXTRA_SIZE = 1024).
+/// Max length of extra info (1024 chars).
 pub const EXTRA_MAX_LEN: usize = 1024;
 
-/// Maximum length of a Mii hex string: (CFLSTORE_SIZE - 2) * 2 = 192 hex chars.
+/// Max length of a Mii hex string (192 chars).
 pub const MII_MAX_LEN: usize = 192;
 
-/// Maximum length of a Discord OAuth2 code (sensible upper bound).
+/// Max length of a Discord OAuth2 code.
 pub const CODE_MAX_LEN: usize = 128;
 
-// ---------------------------------------------------------------------------
-//  Validation helpers
-// ---------------------------------------------------------------------------
-
-/// Check that a hex string has exactly `expected_len` characters and contains
-/// only valid ASCII hex digits (0-9, a-f, A-F).
+/// Check a hex string is exactly `expected_len` chars and valid hex.
 fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result<(), AppError> {
     if value.len() != expected_len {
         return Err(AppError(Box::new(error_response(

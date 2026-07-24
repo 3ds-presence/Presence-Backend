@@ -24,19 +24,14 @@ use sea_orm::DatabaseConnection;
 
 use crate::db;
 
-/// Background task that refreshes Discord OAuth2 tokens before they expire.
-/// Runs every 60 seconds. Refreshes tokens that are within 1/7 of their lifetime
-/// from expiration (i.e., at the 6/7 mark).
+/// Refresh Discord OAuth2 tokens before they expire (runs every 60s).
 pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
     info!("token refresh task started");
 
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
 
-        // Get all users needing refresh: token expires within 1 day
-        // For a 7-day token, this means we refresh when 1 day remains.
-        // That's roughly 6/7 of the lifetime.
-        let margin_secs = 24 * 3600; // 1 day margin
+        let margin_secs = 24 * 3600; // refresh when ≤1 day remains
         let users = match db::get_users_needing_refresh(&db, margin_secs).await {
             Ok(users) => users,
             Err(e) => {
@@ -51,7 +46,6 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
 
         info!("token_refresh: refreshing tokens for {} users", users.len());
 
-        // Process each user (up to 10 concurrent to avoid rate limiting)
         let semaphore = Arc::new(tokio::sync::Semaphore::new(10));
         let mut handles = Vec::new();
 
@@ -66,17 +60,13 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
             }));
         }
 
-        // Wait for all refreshes to complete
         for handle in handles {
             let _ = handle.await;
         }
     }
 }
 
-/// Refresh a single user's Discord OAuth2 token using DiscordSocialRpcAdmin.
-/// The underlying RPC call is synchronous (uses `block_on` internally), so we
-/// wrap it in `spawn_blocking` to avoid panicking when called from an async
-/// tokio runtime context.
+/// Refresh a single user's token (RPC call is sync, so wrap in spawn_blocking).
 async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model, admin: &DiscordSocialRpcAdmin) {
     let admin = admin.clone();
     let refresh_token = user.refresh_token.clone();

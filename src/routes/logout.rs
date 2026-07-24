@@ -32,7 +32,7 @@ pub struct LogoutForm {
     pub auth_hex: String,
 }
 
-/// POST /logout — Stop the Discord activity for an active session and remove it.
+/// POST /logout — Stop Discord activity and remove session.
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LogoutForm>,
@@ -42,7 +42,6 @@ pub async fn handler(
 
     let auth = Auth::from_uuid(uuid, auth_hex.to_string());
 
-    // Stop the activity via session manager
     state.session_manager
         .stop_activity(&auth, 0)
         .await
