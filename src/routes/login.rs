@@ -44,15 +44,8 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    if user.aes_key.len() != 32 {
-        return Err(error_response(
-            500,
-            "crypto_error",
-            "Invalid AES key in database",
-        ));
-    }
-    let mut aes_key = [0u8; 32];
-    aes_key.copy_from_slice(&user.aes_key);
+    let aes_key = extract_aes_key(&user.aes_key)
+        .map_err(|e| error_response(500, "crypto_error", &e))?;
 
     let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
 
@@ -69,27 +62,34 @@ pub async fn handler(
     Ok(success_response(body))
 }
 
+/// Validate the stored AES key and return a fixed-size array.
+fn extract_aes_key(key_bytes: &[u8]) -> Result<[u8; 32], String> {
+    if key_bytes.len() != 32 {
+        return Err("Invalid AES key in database".to_string());
+    }
+    let mut aes_key = [0u8; 32];
+    aes_key.copy_from_slice(key_bytes);
+    Ok(aes_key)
+}
+
 /// Extract client IP from reverse proxy headers (X-Real-IP, then X-Forwarded-For).
 fn extract_real_ip(headers: &HeaderMap) -> Result<IpAddr, &'static str> {
-    // Try X-Real-IP first
-    if let Some(value) = headers.get("x-real-ip") {
-        if let Ok(s) = value.to_str() {
-            if let Ok(ip) = s.parse::<IpAddr>() {
-                return Ok(ip);
-            }
-        }
-    }
+    try_extract_x_real_ip(headers)
+        .or_else(|| try_extract_x_forwarded_for(headers))
+        .ok_or("Could not determine client IP address")
+}
 
-    // Fallback to X-Forwarded-For
-    if let Some(value) = headers.get("x-forwarded-for") {
-        if let Ok(s) = value.to_str() {
-            if let Some(first) = s.split(',').next() {
-                if let Ok(ip) = first.trim().parse::<IpAddr>() {
-                    return Ok(ip);
-                }
-            }
-        }
-    }
+/// Try to parse the client IP from the X-Real-IP header.
+fn try_extract_x_real_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    let value = headers.get("x-real-ip")?;
+    let s = value.to_str().ok()?;
+    s.parse::<IpAddr>().ok()
+}
 
-    Err("Could not determine client IP address")
+/// Try to parse the client IP from the X-Forwarded-For header (first address).
+fn try_extract_x_forwarded_for(headers: &HeaderMap) -> Option<IpAddr> {
+    let value = headers.get("x-forwarded-for")?;
+    let s = value.to_str().ok()?;
+    let first = s.split(',').next()?;
+    first.trim().parse::<IpAddr>().ok()
 }

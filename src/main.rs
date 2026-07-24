@@ -50,64 +50,103 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    // Load .env file
     dotenvy::dotenv().ok();
     env_logger::init();
-
     info!("3DS Presence Server starting...");
 
-    // Load configuration
+    let config = load_config();
+    let db = init_database(&config).await;
+    let discord_rpc = init_discord_rpc(&config);
+    let session_manager = Arc::new(SessionManager::new());
+    let activity_generator = init_activity_generator(&config);
+    let state = build_state(
+        &config,
+        db,
+        discord_rpc,
+        session_manager.clone(),
+        activity_generator,
+    );
+
+    spawn_timeout_task(session_manager.clone());
+    spawn_token_refresh_task(&state);
+
+    let addr = state.config.listen_addr.clone();
+    let app = build_router(state);
+    start_server(app, &addr).await;
+}
+
+/// Load application configuration from environment variables.
+fn load_config() -> Config {
     let config = Config::from_env();
     info!("Configuration loaded");
+    config
+}
 
-    // Initialize database
+/// Initialize the database connection.
+async fn init_database(config: &Config) -> DatabaseConnection {
     let db = db::init_database(&config.database_url)
         .await
         .expect("Failed to initialize database");
     info!("Database initialized: {}", config.database_url);
+    db
+}
 
-    // Create the global DiscordSocialRpcAdmin instance
+/// Initialize the Discord Social RPC admin client.
+fn init_discord_rpc(config: &Config) -> DiscordSocialRpcAdmin {
     info!(
         "DiscordSocialRpcAdmin initialized for app_id={}",
         config.client_id
     );
-    let discord_rpc = DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
-        .expect("Failed to create DiscordSocialRpcAdmin");
+    DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
+        .expect("Failed to create DiscordSocialRpcAdmin")
+}
 
-    // Create session manager
-    let session_manager = Arc::new(SessionManager::new());
-
-    // Initialize activity generator (in-memory catalogue of game metadata)
-    let activity_generator = ActivityGenerator::new(
+/// Initialize the activity generator for building Discord Presence.
+fn init_activity_generator(config: &Config) -> ActivityGenerator {
+    ActivityGenerator::new(
         &config.scripts_dir,
         &config.assets_base_url,
         &config.mii_generator_server,
         config.lua_pool_max,
-    );
+    )
+}
 
-    // Create shared state
-    let state = Arc::new(AppState {
+/// Build the shared application state.
+fn build_state(
+    config: &Config,
+    db: DatabaseConnection,
+    discord_rpc: DiscordSocialRpcAdmin,
+    session_manager: Arc<SessionManager>,
+    activity_generator: ActivityGenerator,
+) -> Arc<AppState> {
+    Arc::new(AppState {
         config: config.clone(),
         db,
         discord_rpc,
-        session_manager: session_manager.clone(),
+        session_manager,
         activity_generator,
-    });
+    })
+}
 
-    // Start background tasks
-    let timeout_session_manager = session_manager.clone();
+/// Spawn the background task that cleans up inactive sessions.
+fn spawn_timeout_task(session_manager: Arc<SessionManager>) {
     tokio::spawn(async move {
-        tasks::timeout::run(timeout_session_manager, 60).await;
+        tasks::timeout::run(session_manager, 60).await;
     });
+}
 
+/// Spawn the background task that refreshes Discord tokens.
+fn spawn_token_refresh_task(state: &Arc<AppState>) {
     let refresh_db = state.db.clone();
     let refresh_admin = state.discord_rpc.clone();
     tokio::spawn(async move {
         tasks::token_refresh::run(refresh_db, refresh_admin).await;
     });
+}
 
-    // Build router
-    let app = Router::new()
+/// Build the Axum router with all routes.
+fn build_router(state: Arc<AppState>) -> Router {
+    Router::new()
         .route("/register", post(routes::register::handler))
         .route("/login", post(routes::login::handler))
         .route("/login/verify", post(routes::login_verify::handler))
@@ -118,15 +157,14 @@ async fn main() {
         )
         .route("/logout", post(routes::logout::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))
-        .with_state(state);
+        .with_state(state)
+}
 
-    // Start server
-    let addr = &config.listen_addr;
+/// Start the HTTP server on the configured address.
+async fn start_server(app: Router, addr: &str) {
     info!("Listening on {addr}");
-
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind to address");
-
     axum::serve(listener, app).await.expect("Server failed");
 }

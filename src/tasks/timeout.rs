@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::info;
+use uuid::Uuid;
 
 use crate::session::SessionManager;
 
@@ -33,17 +34,20 @@ pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
             .await;
 
         for uuid in expired {
-            if let Some(client) = session_manager.get_client(&uuid).await {
-                let client_clone = client.clone();
-                tokio::task::spawn_blocking(move || {
-                    let _ = client_clone.stop_activity();
-                })
-                .await
-                .ok();
-            }
-
+            stop_client_activity(&session_manager, &uuid).await;
             session_manager.remove_session(&uuid).await;
             info!("session {uuid}: cleaned up due to inactivity");
         }
     }
+}
+
+/// If a Discord client exists for this session, stop its activity.
+async fn stop_client_activity(session_manager: &SessionManager, uuid: &Uuid) {
+    let Some(client) = session_manager.get_client(uuid).await else {
+        return;
+    };
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = client.stop_activity();
+    })
+    .await;
 }

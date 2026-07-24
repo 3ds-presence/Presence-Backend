@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 use axum::{extract::State, Form};
+use discord_social_rpc::{CodeExchangeResponse, DiscordSocialRpcAdmin};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -43,10 +44,29 @@ pub async fn handler(
     Form(form): Form<RegisterForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
     let code = validation::validate_code(&form.code)?.to_owned();
-    let redirect_uri = state.config.redirect_uri.clone();
     let discord_rpc = state.discord_rpc.clone();
-
     let debug = state.config.debug_mode;
+
+    let token = exchange_discord_code(code, &state.config.redirect_uri, discord_rpc, debug).await?;
+    let discord_id = fetch_discord_user_id(&token.access_token).await?;
+    let now = crypto::now_secs();
+    let expires_at = now + i64::try_from(token.expires_in).unwrap();
+
+    if let Some(existing_user) = lookup_existing_user(&state.db, &discord_id).await? {
+        return handle_returning_user(&state.db, existing_user, &token, expires_at).await;
+    }
+
+    handle_new_user(&state.db, &discord_id, &token, expires_at, now).await
+}
+
+/// Step 1: Exchange the `OAuth2` code for tokens via Discord.
+async fn exchange_discord_code(
+    code: String,
+    redirect_uri: &str,
+    discord_rpc: DiscordSocialRpcAdmin,
+    debug: bool,
+) -> Result<CodeExchangeResponse, axum::response::Response> {
+    let redirect_uri = redirect_uri.to_owned();
     let token_resp =
         tokio::task::spawn_blocking(move || discord_rpc.exchange_code(&code, &redirect_uri))
             .await
@@ -67,14 +87,15 @@ pub async fn handler(
                 error_response(502, "discord_error", &msg)
             })?;
 
-    // Fetch Discord user identity to get their snowflake ID
+    Ok(token_resp)
+}
+
+/// Step 2: Fetch the Discord user ID (snowflake) from the access token.
+async fn fetch_discord_user_id(access_token: &str) -> Result<String, axum::response::Response> {
     let client = reqwest::Client::new();
     let user_resp = client
         .get("https://discord.com/api/v10/users/@me")
-        .header(
-            "Authorization",
-            format!("Bearer {}", token_resp.access_token),
-        )
+        .header("Authorization", format!("Bearer {access_token}"))
         .send()
         .await
         .map_err(|_e| error_response(502, "discord_error", "Failed to fetch Discord user"))?;
@@ -92,49 +113,64 @@ pub async fn handler(
         .await
         .map_err(|_e| error_response(502, "discord_error", "Failed to parse Discord user"))?;
 
-    let discord_id = &user_info.id;
-    let now = crypto::now_secs();
-    #[allow(clippy::cast_possible_wrap)]
-    let expires_at = now + token_resp.expires_in as i64;
+    Ok(user_info.id)
+}
 
-    // Check if this Discord user has already registered
-    if let Some(existing_user) = db::get_user_by_discord_id(&state.db, discord_id)
+/// Step 3: Check if the Discord user already has an account.
+async fn lookup_existing_user(
+    db: &sea_orm::DatabaseConnection,
+    discord_id: &str,
+) -> Result<Option<crate::models::Model>, axum::response::Response> {
+    db::get_user_by_discord_id(db, discord_id)
         .await
-        .map_err(|_e| error_response(500, "db_error", "Database query failed"))?
-    {
-        // Returning user: preserve uuid and aes_key, update tokens only
-        let uuid = existing_user
-            .uuid
-            .parse::<Uuid>()
-            .map_err(|_e| error_response(500, "db_error", "Invalid stored UUID"))?;
+        .map_err(|_e| error_response(500, "db_error", "Database query failed"))
+}
 
-        db::update_user_tokens(
-            &state.db,
-            &uuid,
-            &token_resp.access_token,
-            &token_resp.refresh_token,
-            expires_at,
-        )
-        .await
-        .map_err(|_e| error_response(500, "db_error", "Failed to update user tokens"))?;
+/// Step 4a: Returning user — update tokens, preserve UUID and AES key.
+async fn handle_returning_user(
+    db: &sea_orm::DatabaseConnection,
+    existing_user: crate::models::Model,
+    token: &CodeExchangeResponse,
+    expires_at: i64,
+) -> Result<axum::response::Response, axum::response::Response> {
+    let uuid = existing_user
+        .uuid
+        .parse::<Uuid>()
+        .map_err(|_e| error_response(500, "db_error", "Invalid stored UUID"))?;
 
-        let aes_hex = hex::encode(&existing_user.aes_key);
-        let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
+    db::update_user_tokens(
+        db,
+        &uuid,
+        &token.access_token,
+        &token.refresh_token,
+        expires_at,
+    )
+    .await
+    .map_err(|_e| error_response(500, "db_error", "Failed to update user tokens"))?;
 
-        return Ok(success_response(body));
-    }
+    let aes_hex = hex::encode(&existing_user.aes_key);
+    let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
+    Ok(success_response(body))
+}
 
-    // New user: generate fresh UUID and AES key
+/// Step 4b: New user — generate fresh UUID and AES key, create account.
+async fn handle_new_user(
+    db: &sea_orm::DatabaseConnection,
+    discord_id: &str,
+    token: &CodeExchangeResponse,
+    expires_at: i64,
+    now: i64,
+) -> Result<axum::response::Response, axum::response::Response> {
     let uuid = Uuid::new_v4();
     let aes_key = crypto::generate_aes_key();
 
     db::create_user(db::CreateUserParams {
-        db: &state.db,
+        db,
         uuid: &uuid,
         discord_id,
         aes_key: &aes_key,
-        access_token: &token_resp.access_token,
-        refresh_token: &token_resp.refresh_token,
+        access_token: &token.access_token,
+        refresh_token: &token.refresh_token,
         token_expires_at: expires_at,
         created_at: now,
     })
@@ -143,6 +179,5 @@ pub async fn handler(
 
     let aes_hex = hex::encode(aes_key);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
-
     Ok(success_response(body))
 }

@@ -141,11 +141,11 @@ pub fn url_encode_3ds(s: &str) -> String {
     out
 }
 
-#[allow(clippy::cast_possible_wrap)]
 /// Get the current Unix timestamp in seconds.
 pub fn now_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() as i64
+        .as_secs()
+        .cast_signed()
 }

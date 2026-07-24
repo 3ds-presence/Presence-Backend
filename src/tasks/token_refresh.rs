@@ -23,12 +23,12 @@ use sea_orm::DatabaseConnection;
 
 use crate::db;
 
-/// Refresh Discord `OAuth2` tokens before they expire (runs every 60s).
+/// Refresh Discord `OAuth2` tokens before they expire (runs every hour).
 pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
     info!("token refresh task started");
 
     loop {
-        tokio::time::sleep(Duration::from_mins(1)).await;
+        tokio::time::sleep(Duration::from_hours(1)).await;
 
         let margin_secs = 24 * 3600; // refresh when ≤1 day remains
         let users = match db::get_users_needing_refresh(&db, margin_secs).await {
@@ -49,20 +49,31 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
         let mut handles = Vec::new();
 
         for user in users {
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
             let db_clone = db.clone();
             let admin_clone = admin.clone();
+            let sem_clone = semaphore.clone();
 
-            handles.push(tokio::spawn(async move {
-                let _permit = permit;
-                refresh_user_token(&db_clone, &user, &admin_clone).await;
-            }));
+            let handle = spawn_user_refresh(sem_clone, db_clone, user, admin_clone);
+            handles.push(handle);
         }
 
         for handle in handles {
             let _ = handle.await;
         }
     }
+}
+
+/// Spawn a user refresh task with semaphore acquisition.
+fn spawn_user_refresh(
+    sem_clone: Arc<tokio::sync::Semaphore>,
+    db_clone: sea_orm::DatabaseConnection,
+    user: crate::models::Model,
+    admin_clone: DiscordSocialRpcAdmin,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let _permit = sem_clone.acquire_owned().await.unwrap();
+        refresh_user_token(&db_clone, &user, &admin_clone).await;
+    })
 }
 
 /// Refresh a single user's token (RPC call is sync, so wrap in `spawn_blocking`).
@@ -73,39 +84,41 @@ async fn refresh_user_token(
 ) {
     let admin = admin.clone();
     let refresh_token = user.refresh_token.clone();
-
     let result =
         tokio::task::spawn_blocking(move || admin.refresh_user_token(&refresh_token)).await;
 
     match result {
-        Ok(Ok(resp)) => {
-            let now = crate::crypto::now_secs();
-            #[allow(clippy::cast_possible_wrap)]
-            let expires_at = now + resp.expires_in as i64;
-            let new_refresh = resp.refresh_token.unwrap_or_else(|| user.refresh_token.clone());
+        Ok(Ok(resp)) => apply_refresh(db, user, &resp).await,
+        Ok(Err(e)) => warn!("token_refresh: error for {}: {}", user.uuid, e),
+        Err(e) => warn!("token_refresh: error for {}: {}", user.uuid, e),
+    }
+}
 
-            let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
-                warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
-                return;
-            };
+async fn apply_refresh(
+    db: &DatabaseConnection,
+    user: &crate::models::Model,
+    resp: &discord_social_rpc::TokenRefreshResponse,
+) {
+    let now = crate::crypto::now_secs();
+    let expires_at = now + i64::try_from(resp.expires_in).unwrap();
+    let new_refresh = resp
+        .refresh_token
+        .clone()
+        .unwrap_or_else(|| user.refresh_token.clone());
 
-            if let Err(e) =
-                db::update_user_tokens(db, &uuid, &resp.access_token, &new_refresh, expires_at)
-                    .await
-            {
-                warn!(
-                    "token_refresh: failed to update tokens for {}: {}",
-                    user.uuid, e
-                );
-            } else {
-                info!("token_refresh: refreshed tokens for {}", user.uuid);
-            }
-        }
-        Ok(Err(e)) => {
-            warn!("token_refresh: error for {}: {}", user.uuid, e);
-        }
-        Err(e) => {
-            warn!("token_refresh: error for {}: {}", user.uuid, e);
-        }
+    let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
+        warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
+        return;
+    };
+
+    if let Err(e) =
+        db::update_user_tokens(db, &uuid, &resp.access_token, &new_refresh, expires_at).await
+    {
+        warn!(
+            "token_refresh: failed to update tokens for {}: {}",
+            user.uuid, e
+        );
+    } else {
+        info!("token_refresh: refreshed tokens for {}", user.uuid);
     }
 }
