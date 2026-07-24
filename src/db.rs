@@ -23,6 +23,18 @@ use uuid::Uuid;
 
 use crate::models;
 
+/// Parameters for creating a new user.
+pub struct CreateUserParams<'a> {
+    pub db: &'a DatabaseConnection,
+    pub uuid: &'a Uuid,
+    pub discord_id: &'a str,
+    pub aes_key: &'a [u8],
+    pub access_token: &'a str,
+    pub refresh_token: &'a str,
+    pub token_expires_at: i64,
+    pub created_at: i64,
+}
+
 /// Initialize the database connection and ensure the users table exists.
 pub async fn init_database(url: &str) -> Result<DatabaseConnection, DbErr> {
     let db = Database::connect(url).await?;
@@ -39,26 +51,17 @@ pub async fn init_database(url: &str) -> Result<DatabaseConnection, DbErr> {
 }
 
 /// Create a new user in the database.
-pub async fn create_user(
-    db: &DatabaseConnection,
-    uuid: &Uuid,
-    discord_id: &str,
-    aes_key: &[u8],
-    access_token: &str,
-    refresh_token: &str,
-    token_expires_at: i64,
-    created_at: i64,
-) -> Result<(), DbErr> {
+pub async fn create_user(params: CreateUserParams<'_>) -> Result<(), DbErr> {
     let user = models::ActiveModel {
-        uuid: Set(uuid.to_string()),
-        discord_id: Set(discord_id.to_string()),
-        aes_key: Set(aes_key.to_vec()),
-        access_token: Set(access_token.to_string()),
-        refresh_token: Set(refresh_token.to_string()),
-        token_expires_at: Set(token_expires_at),
-        created_at: Set(created_at),
+        uuid: Set(params.uuid.to_string()),
+        discord_id: Set(params.discord_id.to_string()),
+        aes_key: Set(params.aes_key.to_vec()),
+        access_token: Set(params.access_token.to_string()),
+        refresh_token: Set(params.refresh_token.to_string()),
+        token_expires_at: Set(params.token_expires_at),
+        created_at: Set(params.created_at),
     };
-    user.insert(db).await?;
+    user.insert(params.db).await?;
     Ok(())
 }
 

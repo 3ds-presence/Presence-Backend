@@ -17,6 +17,19 @@
 
 use axum::response::Response;
 
+/// Thin wrapper around a boxed `axum::response::Response` to keep the
+/// `Err`-variant small and avoid clippy::result_large_err.
+#[derive(Debug)]
+pub struct AppError(pub Box<Response>);
+
+/// Convert `AppError` back into an `axum::response::Response` automatically
+/// so the `?` operator works in handlers returning `Result<_, Response>`.
+impl From<AppError> for Response {
+    fn from(err: AppError) -> Self {
+        *err.0
+    }
+}
+
 /// Build a 200 success response with form-urlencoded body.
 pub fn success_response(body: impl Into<String>) -> Response {
     Response::builder()

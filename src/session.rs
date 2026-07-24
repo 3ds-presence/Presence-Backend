@@ -275,7 +275,7 @@ impl SessionManager {
     ) -> Result<(Arc<DiscordRpcClient>, IpAddr, u64), SessionError> {
         let mut sessions = self.sessions.lock().await;
         let session = sessions.get_mut(&auth.uuid)
-            .ok_or_else(|| SessionError::SessionNotFound)?;
+            .ok_or(SessionError::SessionNotFound)?;
 
         let (client, aes_key, last_counter, last_activity, client_ip) = match session {
             SessionState::Active { client, aes_key, last_counter, last_activity, client_ip, .. } => {

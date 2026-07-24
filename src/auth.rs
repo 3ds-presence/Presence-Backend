@@ -17,7 +17,7 @@
 
 use uuid::Uuid;
 
-use crate::response::error_response;
+use crate::response::{error_response, AppError};
 
 /// A validated authentication pair: UUID + hex string (auth_hex or cipher_hex).
 ///
@@ -39,13 +39,13 @@ impl Auth {
     /// Create a new `Auth` from raw uuid and hex strings.
     ///
     /// Returns an error response (400) if the UUID is not valid.
-    pub fn new(uuid_str: &str, hex: &str) -> Result<Self, axum::response::Response> {
+    pub fn new(uuid_str: &str, hex: &str) -> Result<Self, AppError> {
         if uuid_str.is_empty() || hex.is_empty() {
-            return Err(error_response(400, "missing_field", "uuid and hex are required"));
+            return Err(AppError(Box::new(error_response(400, "missing_field", "uuid and hex are required"))));
         }
 
         let uuid = Uuid::parse_str(uuid_str)
-            .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
+            .map_err(|_| AppError(Box::new(error_response(400, "invalid_uuid", "Invalid UUID format"))))?;
 
         Ok(Self {
             uuid,

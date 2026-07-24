@@ -110,16 +110,16 @@ pub async fn handler(
     let uuid = Uuid::new_v4();
     let aes_key = crypto::generate_aes_key();
 
-    db::create_user(
-        &state.db,
-        &uuid,
+    db::create_user(db::CreateUserParams {
+        db: &state.db,
+        uuid: &uuid,
         discord_id,
-        &aes_key,
-        &token_resp.access_token,
-        &token_resp.refresh_token,
-        expires_at,
-        now,
-    )
+        aes_key: &aes_key,
+        access_token: &token_resp.access_token,
+        refresh_token: &token_resp.refresh_token,
+        token_expires_at: expires_at,
+        created_at: now,
+    })
     .await
     .map_err(|_e| error_response(500, "db_error", "Failed to create user"))?;
 
