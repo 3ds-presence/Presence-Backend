@@ -32,7 +32,12 @@ pub struct RegisterForm {
     pub code: String,
 }
 
-/// POST /register — Exchange a Discord OAuth2 code for an account.
+#[derive(serde::Deserialize)]
+struct DiscordUserResponse {
+    id: String,
+}
+
+/// POST /register — Exchange a Discord `OAuth2` code for an account.
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<RegisterForm>,
@@ -47,7 +52,7 @@ pub async fn handler(
             .await
             .map_err(|e| {
                 let msg = if debug {
-                    format!("Spawn blocking failed: {}", e)
+                    format!("Spawn blocking failed: {e}")
                 } else {
                     "Internal error".to_string()
                 };
@@ -55,7 +60,7 @@ pub async fn handler(
             })?
             .map_err(|e| {
                 let msg = if debug {
-                    format!("Discord error: {}", e)
+                    format!("Discord error: {e}")
                 } else {
                     "Discord authentication failed".to_string()
                 };
@@ -82,11 +87,6 @@ pub async fn handler(
         ));
     }
 
-    #[derive(serde::Deserialize)]
-    struct DiscordUserResponse {
-        id: String,
-    }
-
     let user_info: DiscordUserResponse = user_resp
         .json()
         .await
@@ -94,6 +94,7 @@ pub async fn handler(
 
     let discord_id = &user_info.id;
     let now = crypto::now_secs();
+    #[allow(clippy::cast_possible_wrap)]
     let expires_at = now + token_resp.expires_in as i64;
 
     // Check if this Discord user has already registered
@@ -118,7 +119,7 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Failed to update user tokens"))?;
 
         let aes_hex = hex::encode(&existing_user.aes_key);
-        let body = format!("uuid={}&aes_key_hex={}", uuid, aes_hex);
+        let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
 
         return Ok(success_response(body));
     }
@@ -141,7 +142,7 @@ pub async fn handler(
     .map_err(|_e| error_response(500, "db_error", "Failed to create user"))?;
 
     let aes_hex = hex::encode(aes_key);
-    let body = format!("uuid={}&aes_key_hex={}", uuid, aes_hex);
+    let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
 
     Ok(success_response(body))
 }

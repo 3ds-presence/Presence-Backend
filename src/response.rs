@@ -17,11 +17,11 @@
 use axum::response::Response;
 
 /// Thin wrapper around a boxed `Response` to keep the `Err`-variant small
-/// and avoid clippy::result_large_err.
+/// and avoid `clippy::result_large_err`.
 #[derive(Debug)]
 pub struct AppError(pub Box<Response>);
 
-/// Convert AppError into an axum response for use with the `?` operator.
+/// Convert `AppError` into an axum response for use with the `?` operator.
 impl From<AppError> for Response {
     fn from(err: AppError) -> Self {
         *err.0

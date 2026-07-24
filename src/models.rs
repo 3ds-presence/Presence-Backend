@@ -17,7 +17,7 @@
 use sea_orm::entity::prelude::*;
 
 /// Users table — stores account information.
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "users")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
@@ -27,9 +27,9 @@ pub struct Model {
     pub discord_id: String,
     /// AES-256 key (32 bytes) stored as binary.
     pub aes_key: Vec<u8>,
-    /// Discord OAuth2 access token.
+    /// Discord `OAuth2` access token.
     pub access_token: String,
-    /// Discord OAuth2 refresh token.
+    /// Discord `OAuth2` refresh token.
     pub refresh_token: String,
     /// Unix timestamp (seconds) when the access token expires.
     pub token_expires_at: i64,

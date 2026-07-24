@@ -43,7 +43,7 @@ pub enum SessionState {
         created_at: Instant,
         client_ip: IpAddr,
     },
-    /// Session is active — DiscordRpcClient is connected and running.
+    /// Session is active — `DiscordRpcClient` is connected and running.
     Active {
         client: Arc<DiscordRpcClient>,
         aes_key: [u8; 32],
@@ -90,12 +90,12 @@ impl std::fmt::Display for SessionError {
         match self {
             Self::SessionNotFound => write!(f, "session not found"),
             Self::PendingNotActive => write!(f, "session is pending verification, not active"),
-            Self::AuthFailed(msg) => write!(f, "auth verification failed: {}", msg),
+            Self::AuthFailed(msg) => write!(f, "auth verification failed: {msg}"),
             Self::ReplayDetected { counter, last } => {
-                write!(f, "replay detected: counter {} <= last {}", counter, last)
+                write!(f, "replay detected: counter {counter} <= last {last}")
             }
-            Self::Cooldown { remaining } => write!(f, "cooldown: wait {} seconds", remaining),
-            Self::Other(msg) => write!(f, "{}", msg),
+            Self::Cooldown { remaining } => write!(f, "cooldown: wait {remaining} seconds"),
+            Self::Other(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -122,13 +122,13 @@ impl IntoResponse for SessionError {
 
 impl From<&str> for SessionError {
     fn from(s: &str) -> Self {
-        SessionError::Other(s.to_string())
+        Self::Other(s.to_string())
     }
 }
 
 impl From<String> for SessionError {
     fn from(s: String) -> Self {
-        SessionError::Other(s)
+        Self::Other(s)
     }
 }
 
@@ -159,8 +159,7 @@ impl SessionManager {
     /// Remove a session by UUID, decrement IP counter, and return its state.
     /// Only locks `ip_counts` if the session actually existed.
     async fn remove_session_with_ip(&self, uuid: &Uuid) -> Option<SessionState> {
-        let mut sessions = self.sessions.lock().await;
-        let state = sessions.remove(uuid);
+        let state = self.sessions.lock().await.remove(uuid);
         if let Some(ref s) = state {
             let mut ip_counts = self.ip_counts.lock().await;
             let ip = s.client_ip();
@@ -178,7 +177,6 @@ impl SessionManager {
         max_per_ip: usize,
     ) -> Result<u64, &'static str> {
         let nonce = crypto::generate_nonce();
-        let mut sessions = self.sessions.lock().await;
         let mut ip_counts = self.ip_counts.lock().await;
 
         let count = ip_counts.entry(client_ip).or_insert(0);
@@ -187,7 +185,9 @@ impl SessionManager {
         }
         *count += 1;
 
-        sessions.insert(
+        drop(ip_counts);
+
+        self.sessions.lock().await.insert(
             uuid,
             SessionState::PendingVerify {
                 nonce,
@@ -237,7 +237,7 @@ impl SessionManager {
         cipher_arr.copy_from_slice(&cipher_bytes);
 
         let plaintext = crypto::decrypt_aes_cbc(&cipher_arr, &aes_key)
-            .map_err(|e| SessionError::from(format!("decryption failed: {}", e)))?;
+            .map_err(|e| SessionError::from(format!("decryption failed: {e}")))?;
 
         if plaintext.len() < 8 {
             return Err("decrypted data too short".into());
@@ -250,7 +250,7 @@ impl SessionManager {
 
         let client = discord_rpc
             .create_new_client(access_token)
-            .map_err(|e| SessionError::from(format!("failed to create Discord client: {}", e)))?;
+            .map_err(|e| SessionError::from(format!("failed to create Discord client: {e}")))?;
 
         let client = Arc::new(client);
 
@@ -259,21 +259,21 @@ impl SessionManager {
             let _ = client_clone.start_activity();
         })
         .await
-        .map_err(|e| SessionError::from(format!("spawn_blocking failed: {}", e)))?;
+        .map_err(|e| SessionError::from(format!("spawn_blocking failed: {e}")))?;
 
         log::info!(
             "session {}: Discord client created and gateway started",
             auth.uuid
         );
 
-        let mut sessions = self.sessions.lock().await;
-        sessions.insert(
+        self.sessions.lock().await.insert(
             auth.uuid,
             SessionState::Active {
                 client,
                 aes_key,
                 last_counter: AtomicU64::new(nonce),
-                last_activity: Instant::now() - Duration::from_secs(cooldown_secs + 1),
+                last_activity: Instant::now().checked_sub(Duration::from_secs(cooldown_secs + 1))
+                    .unwrap(),
                 client_ip,
                 user_info,
             },
@@ -283,7 +283,8 @@ impl SessionManager {
     }
 
     /// Verify the auth and cooldown for an active session.
-    /// Returns (client, client_ip, good_counter) on success.
+    /// Returns (client, `client_ip`, `good_counter`) on success.
+    #[allow(clippy::significant_drop_tightening)]
     async fn authenticate_and_get_client(
         &self,
         auth: &Auth,
@@ -329,8 +330,8 @@ impl SessionManager {
         Ok((client, client_ip, good_counter))
     }
 
-    /// Shared: authenticate + cooldown for an active session, then update counter and last_activity.
-    /// Returns the DiscordRpcClient on success.
+    /// Shared: authenticate + cooldown for an active session, then update counter and `last_activity`.
+    /// Returns the `DiscordRpcClient` on success.
     pub async fn authenticate_and_tick(
         &self,
         auth: &Auth,
@@ -341,15 +342,17 @@ impl SessionManager {
             .authenticate_and_get_client(auth, fields, cooldown_secs)
             .await?;
 
-        let mut sessions = self.sessions.lock().await;
-        if let Some(SessionState::Active {
-            last_counter,
-            last_activity,
-            ..
-        }) = sessions.get_mut(&auth.uuid)
         {
-            last_counter.store(good_counter, Ordering::SeqCst);
-            *last_activity = Instant::now();
+            let mut sessions = self.sessions.lock().await;
+            if let Some(SessionState::Active {
+                last_counter,
+                last_activity,
+                ..
+            }) = sessions.get_mut(&auth.uuid)
+            {
+                last_counter.store(good_counter, Ordering::SeqCst);
+                *last_activity = Instant::now();
+            }
         }
 
         Ok((client, good_counter))
@@ -403,12 +406,12 @@ impl SessionManager {
             let _ = client_set.set_activity(activity);
         })
         .await
-        .map_err(|e| SessionError::from(format!("set_activity spawn failed: {}", e)))?;
+        .map_err(|e| SessionError::from(format!("set_activity spawn failed: {e}")))?;
 
         Ok(())
     }
 
-    /// Heartbeat: verify session + auth + cooldown, update counter and last_activity,
+    /// Heartbeat: verify session + auth + cooldown, update counter and `last_activity`,
     /// but do NOT change the Discord activity.
     pub async fn heartbeat(&self, auth: &Auth, cooldown_secs: u64) -> Result<(), SessionError> {
         let fields: [&str; 0] = [];
@@ -431,7 +434,7 @@ impl SessionManager {
             let _ = client_stop.stop_activity();
         })
         .await
-        .map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
+        .map_err(|e| SessionError::from(format!("stop_activity spawn failed: {e}")))?;
 
         self.remove_session_with_ip(&auth.uuid).await;
         log::info!("session {}: activity stopped by client (logout)", auth.uuid);
@@ -474,7 +477,7 @@ impl SessionManager {
         matches!(sessions.get(uuid), Some(SessionState::Active { .. }))
     }
 
-    /// Get a copy of the DiscordRpcClient for an active session.
+    /// Get a copy of the `DiscordRpcClient` for an active session.
     pub async fn get_client(&self, uuid: &Uuid) -> Option<Arc<DiscordRpcClient>> {
         let sessions = self.sessions.lock().await;
         match sessions.get(uuid) {
@@ -486,15 +489,14 @@ impl SessionManager {
 
 /// Helper to extract the client IP from any session state variant.
 impl SessionState {
-    pub fn client_ip(&self) -> IpAddr {
+    pub const fn client_ip(&self) -> IpAddr {
         match self {
-            SessionState::PendingVerify { client_ip, .. } => *client_ip,
-            SessionState::Active { client_ip, .. } => *client_ip,
+            Self::PendingVerify { client_ip, .. } | Self::Active { client_ip, .. } => *client_ip,
         }
     }
 }
 
-/// Convert a SessionError into an HTTP response, masking internal details
+/// Convert a `SessionError` into an HTTP response, masking internal details
 /// when debug mode is disabled (production).
 pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
     match err {
@@ -524,7 +526,7 @@ pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
         }
         // Cooldown remaining is useful for the client
         SessionError::Cooldown { remaining } => {
-            error_response(429, "cooldown", &format!("Wait {} seconds", remaining))
+            error_response(429, "cooldown", &format!("Wait {remaining} seconds"))
         }
         SessionError::Other(msg) => {
             let msg = if debug {

@@ -31,7 +31,7 @@ pub struct ResetAesForm {
     pub aes_key_hex: String,
 }
 
-/// POST /reset_aes — Reset the AES-256 key (authorized by providing the current key).
+/// POST /`reset_aes` — Reset the AES-256 key (authorized by providing the current key).
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ResetAesForm>,
@@ -56,7 +56,7 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Failed to update AES key"))?;
 
     let new_hex = hex::encode(new_key);
-    let body = format!("aes_key_hex={}", new_hex);
+    let body = format!("aes_key_hex={new_hex}");
 
     Ok(success_response(body))
 }

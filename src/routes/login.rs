@@ -56,7 +56,7 @@ pub async fn handler(
 
     let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
 
-    info!("Login request for UUID {} from IP {}", uuid, client_ip);
+    info!("Login request for UUID {uuid} from IP {client_ip}");
 
     let nonce = state
         .session_manager
@@ -64,7 +64,7 @@ pub async fn handler(
         .await
         .map_err(|e| error_response(429, "rate_limited", e))?;
 
-    let body = format!("nonce={}", nonce);
+    let body = format!("nonce={nonce}");
 
     Ok(success_response(body))
 }

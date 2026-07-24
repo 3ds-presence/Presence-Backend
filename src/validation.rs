@@ -21,10 +21,10 @@ use crate::response::{error_response, AppError};
 /// Max length of a UUID string (36 chars).
 pub const UUID_MAX_LEN: usize = 36;
 
-/// Expected length of auth_hex: 48 bytes → 96 hex chars.
+/// Expected length of `auth_hex`: 48 bytes → 96 hex chars.
 pub const AUTH_HEX_LEN: usize = 96;
 
-/// Expected length of cipher_hex: 16 bytes → 32 hex chars.
+/// Expected length of `cipher_hex`: 16 bytes → 32 hex chars.
 pub const CIPHER_HEX_LEN: usize = 32;
 
 /// Expected length of AES key hex: 32 bytes → 64 hex chars.
@@ -45,7 +45,7 @@ pub const EXTRA_MAX_LEN: usize = 1024;
 /// Max length of a Mii hex string (192 chars).
 pub const MII_MAX_LEN: usize = 192;
 
-/// Max length of a Discord OAuth2 code.
+/// Max length of a Discord `OAuth2` code.
 pub const CODE_MAX_LEN: usize = 128;
 
 /// Check a hex string is exactly `expected_len` chars and valid hex.
@@ -53,18 +53,17 @@ fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result
     if value.len() != expected_len {
         return Err(AppError(Box::new(error_response(
             400,
-            &format!("invalid_{}", field_name),
+            &format!("invalid_{field_name}"),
             &format!(
-                "{} must be exactly {} hex characters",
-                field_name, expected_len
+                "{field_name} must be exactly {expected_len} hex characters"
             ),
         ))));
     }
     if !value.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(AppError(Box::new(error_response(
             400,
-            &format!("invalid_{}", field_name),
-            &format!("{} must contain only hex characters", field_name),
+            &format!("invalid_{field_name}"),
+            &format!("{field_name} must contain only hex characters"),
         ))));
     }
     Ok(())
@@ -75,15 +74,15 @@ fn check_max_len(value: &str, max_len: usize, field_name: &str) -> Result<(), Ap
     if value.is_empty() {
         return Err(AppError(Box::new(error_response(
             400,
-            &format!("missing_{}", field_name),
-            &format!("{} is required", field_name),
+            &format!("missing_{field_name}"),
+            &format!("{field_name} is required"),
         ))));
     }
     if value.len() > max_len {
         return Err(AppError(Box::new(error_response(
             400,
-            &format!("invalid_{}", field_name),
-            &format!("{} too long (max {} characters)", field_name, max_len),
+            &format!("invalid_{field_name}"),
+            &format!("{field_name} too long (max {max_len} characters)"),
         ))));
     }
     Ok(())
@@ -101,13 +100,13 @@ pub fn validate_uuid(uuid: &str) -> Result<Uuid, AppError> {
     })
 }
 
-/// Validate an auth_hex string (exactly 96 hex chars) and return it.
+/// Validate an `auth_hex` string (exactly 96 hex chars) and return it.
 pub fn validate_auth_hex(hex: &str) -> Result<&str, AppError> {
     check_hex_exact(hex, AUTH_HEX_LEN, "auth_hex")?;
     Ok(hex)
 }
 
-/// Validate a cipher_hex string (exactly 32 hex chars) and return it.
+/// Validate a `cipher_hex` string (exactly 32 hex chars) and return it.
 pub fn validate_cipher_hex(hex: &str) -> Result<&str, AppError> {
     check_hex_exact(hex, CIPHER_HEX_LEN, "cipher_hex")?;
     Ok(hex)
@@ -165,7 +164,7 @@ pub fn validate_extra(extra: Option<String>) -> Result<Option<String>, AppError>
             return Err(AppError(Box::new(error_response(
                 400,
                 "invalid_extra",
-                &format!("extra too long (max {} characters)", EXTRA_MAX_LEN),
+                &format!("extra too long (max {EXTRA_MAX_LEN} characters)"),
             ))));
         }
     }
@@ -179,7 +178,7 @@ pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
             return Err(AppError(Box::new(error_response(
                 400,
                 "invalid_mii",
-                &format!("mii too long (max {} characters)", MII_MAX_LEN),
+                &format!("mii too long (max {MII_MAX_LEN} characters)"),
             ))));
         }
         if !m.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -193,7 +192,7 @@ pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
     Ok(mii)
 }
 
-/// Validate a Discord OAuth2 code (max 128 chars, non-empty) and return it.
+/// Validate a Discord `OAuth2` code (max 128 chars, non-empty) and return it.
 pub fn validate_code(code: &str) -> Result<&str, AppError> {
     check_max_len(code, CODE_MAX_LEN, "code")?;
     Ok(code)

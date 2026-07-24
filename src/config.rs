@@ -19,11 +19,11 @@ use std::env;
 /// Server configuration loaded from environment variables / .env file.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Discord application ID (same as OAuth2 client ID).
+    /// Discord application ID (same as `OAuth2` client ID).
     pub client_id: String,
-    /// Discord OAuth2 client secret.
+    /// Discord `OAuth2` client secret.
     pub client_secret: String,
-    /// OAuth2 redirect URI (must match Discord Developer Portal).
+    /// `OAuth2` redirect URI (must match Discord Developer Portal).
     pub redirect_uri: String,
     /// Database connection URL.
     pub database_url: String,
@@ -33,15 +33,15 @@ pub struct Config {
     pub max_clients_per_ip: usize,
     /// Server listen address.
     pub listen_addr: String,
-    /// Base URL for game icon images (e.g. "http://localhost:8080/imgs/").
+    /// Base URL for game icon images (e.g. "<http://localhost:8080/imgs>/").
     pub assets_base_url: String,
-    /// Directory containing game scripts (title_id/script.lua).
+    /// Directory containing game scripts (`title_id/script.lua`).
     pub scripts_dir: String,
-    /// URL of the Mii generator server (e.g. "http://localhost:8080/miis/").
+    /// URL of the Mii generator server (e.g. "<http://localhost:8080/miis>/").
     pub mii_generator_server: String,
     /// Maximum number of Lua VMs to keep in the pool for activity scripts (0 = default 64).
     pub lua_pool_max: usize,
-    /// Whether to expose detailed error messages (set to true when RUST_LOG=debug).
+    /// Whether to expose detailed error messages (set to true when `RUST_LOG=debug`).
     pub debug_mode: bool,
 }
 
@@ -74,8 +74,7 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(64),
             debug_mode: env::var("RUST_LOG")
-                .map(|v| v.to_lowercase().contains("debug"))
-                .unwrap_or(false),
+                .is_ok_and(|v| v.to_lowercase().contains("debug")),
         }
     }
 }

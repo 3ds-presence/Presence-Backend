@@ -122,7 +122,7 @@ async fn main() {
 
     // Start server
     let addr = &config.listen_addr;
-    info!("Listening on {}", addr);
+    info!("Listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

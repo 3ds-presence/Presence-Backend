@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::response::{error_response, AppError};
 
-/// A validated authentication pair: UUID + hex string (auth_hex or cipher_hex).
+/// A validated authentication pair: UUID + hex string (`auth_hex` or `cipher_hex`).
 ///
 /// Creating via `Auth::new` validates the UUID format.
 /// Functions that need both `uuid` and `hex` should accept `&Auth`
@@ -31,7 +31,7 @@ pub struct Auth {
 
 impl Auth {
     /// Create from a pre-validated UUID and hex string (no re-parsing).
-    pub fn from_uuid(uuid: Uuid, hex: String) -> Self {
+    pub const fn from_uuid(uuid: Uuid, hex: String) -> Self {
         Self { uuid, hex }
     }
 

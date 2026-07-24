@@ -23,18 +23,18 @@ use sea_orm::DatabaseConnection;
 
 use crate::db;
 
-/// Refresh Discord OAuth2 tokens before they expire (runs every 60s).
+/// Refresh Discord `OAuth2` tokens before they expire (runs every 60s).
 pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
     info!("token refresh task started");
 
     loop {
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_mins(1)).await;
 
         let margin_secs = 24 * 3600; // refresh when ≤1 day remains
         let users = match db::get_users_needing_refresh(&db, margin_secs).await {
             Ok(users) => users,
             Err(e) => {
-                warn!("token_refresh: failed to query users: {}", e);
+                warn!("token_refresh: failed to query users: {e}");
                 continue;
             }
         };
@@ -65,7 +65,7 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
     }
 }
 
-/// Refresh a single user's token (RPC call is sync, so wrap in spawn_blocking).
+/// Refresh a single user's token (RPC call is sync, so wrap in `spawn_blocking`).
 async fn refresh_user_token(
     db: &DatabaseConnection,
     user: &crate::models::Model,
@@ -80,15 +80,13 @@ async fn refresh_user_token(
     match result {
         Ok(Ok(resp)) => {
             let now = crate::crypto::now_secs();
+            #[allow(clippy::cast_possible_wrap)]
             let expires_at = now + resp.expires_in as i64;
-            let new_refresh = resp.refresh_token.unwrap_or(user.refresh_token.clone());
+            let new_refresh = resp.refresh_token.unwrap_or_else(|| user.refresh_token.clone());
 
-            let uuid = match uuid::Uuid::parse_str(&user.uuid) {
-                Ok(u) => u,
-                Err(_) => {
-                    warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
-                    return;
-                }
+            let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
+                warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
+                return;
             };
 
             if let Err(e) =

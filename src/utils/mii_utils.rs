@@ -25,12 +25,11 @@ pub enum MiiError {
 impl fmt::Display for MiiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MiiError::HexDecode(e) => write!(f, "Hex decode error: {}", e),
-            MiiError::TooShort { expected, actual } => {
+            Self::HexDecode(e) => write!(f, "Hex decode error: {e}"),
+            Self::TooShort { expected, actual } => {
                 write!(
                     f,
-                    "Mii data too short: expected at least {} bytes, got {}",
-                    expected, actual
+                    "Mii data too short: expected at least {expected} bytes, got {actual}"
                 )
             }
         }

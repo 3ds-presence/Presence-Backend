@@ -86,7 +86,7 @@ pub async fn get_user_by_uuid(
         .await
 }
 
-/// Update the OAuth2 tokens for a user.
+/// Update the `OAuth2` tokens for a user.
 pub async fn update_user_tokens(
     db: &DatabaseConnection,
     uuid: &Uuid,

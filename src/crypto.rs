@@ -17,6 +17,7 @@
 use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 use rand::RngExt;
 use sha2::{Digest, Sha256};
+use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
@@ -129,15 +130,18 @@ pub fn url_encode_3ds(s: &str) -> String {
     for &b in s.as_bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
+                out.push(b as char);
             }
             b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{:02X}", b)),
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
         }
     }
     out
 }
 
+#[allow(clippy::cast_possible_wrap)]
 /// Get the current Unix timestamp in seconds.
 pub fn now_secs() -> i64 {
     SystemTime::now()

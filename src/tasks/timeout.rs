@@ -23,7 +23,7 @@ use crate::session::SessionManager;
 
 /// Periodic cleanup of sessions inactive for `timeout_secs`.
 pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
-    info!("timeout task started (timeout={}s)", timeout_secs);
+    info!("timeout task started (timeout={timeout_secs}s)");
 
     loop {
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -43,7 +43,7 @@ pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
             }
 
             session_manager.remove_session(&uuid).await;
-            info!("session {}: cleaned up due to inactivity", uuid);
+            info!("session {uuid}: cleaned up due to inactivity");
         }
     }
 }
