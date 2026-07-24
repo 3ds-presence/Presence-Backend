@@ -24,6 +24,7 @@ use serde::Deserialize;
 
 use crate::db;
 use crate::response::{error_response, success_response};
+use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -38,9 +39,7 @@ pub async fn handler(
     headers: HeaderMap,
     Form(form): Form<LoginForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    // Parse UUID
-    let uuid = form.uuid.parse()
-        .map_err(|_| error_response(400, "invalid_uuid", "Invalid UUID format"))?;
+    let uuid = validation::validate_uuid(&form.uuid)?;
 
     // Look up user in database
     let user = db::get_user_by_uuid(&state.db, &uuid)

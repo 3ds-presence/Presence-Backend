@@ -22,8 +22,9 @@ use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
-use crate::response::{error_response, success_response};
+use crate::response::success_response;
 use crate::session::session_error_into_response;
+use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize, Debug, Default)]
@@ -41,28 +42,23 @@ pub async fn set_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let titleid = match &form.titleid {
-        Some(t) => t.clone(),
-        None => return Err(error_response(400, "missing_field", "titleid is required")),
-    };
+    let uuid = validation::validate_uuid(&form.uuid)?;
+    let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
 
-    if titleid.chars().count() != 16 {
-        return Err(error_response(400, "invalid_titleid", "titleid must be exactly 16 characters long"));
-    }
+    let titleid = validation::validate_titleid(form.titleid)?;
+    let name = validation::validate_name(form.name)?;
+    let publisher = validation::validate_publisher(form.publisher)?;
+    let extra = validation::validate_extra(form.extra)?;
 
-    if form.name.is_none() || form.publisher.is_none() {
-        return Err(error_response(400, "missing_field", "name and publisher are required"));
-    }
-
-    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
+    let auth = Auth::from_uuid(uuid, auth_hex.to_string());
     let game_info = GameInfo {
         title_id: titleid,
-        name: form.name.clone().unwrap_or_default(),
-        publisher: form.publisher.clone().unwrap_or_default(),
+        name,
+        publisher,
     };
 
     state.session_manager
-        .update_activity(&state, &auth, game_info, form.extra)
+        .update_activity(&state, &auth, game_info, extra)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
@@ -74,7 +70,10 @@ pub async fn heartbeat_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
+    let uuid = validation::validate_uuid(&form.uuid)?;
+    let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
+
+    let auth = Auth::from_uuid(uuid, auth_hex.to_string());
 
     state.session_manager
         .heartbeat(&auth, state.config.activity_cooldown_secs)

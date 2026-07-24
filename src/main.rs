@@ -35,6 +35,7 @@ mod routes;
 mod session;
 mod tasks;
 mod utils;
+mod validation;
 
 use config::Config;
 use session::SessionManager;

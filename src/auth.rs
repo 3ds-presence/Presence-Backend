@@ -31,6 +31,11 @@ pub struct Auth {
 }
 
 impl Auth {
+    /// Create a new `Auth` from a pre-validated UUID and hex string (no re-parsing).
+    pub fn from_uuid(uuid: Uuid, hex: String) -> Self {
+        Self { uuid, hex }
+    }
+
     /// Create a new `Auth` from raw uuid and hex strings.
     ///
     /// Returns an error response (400) if the UUID is not valid.

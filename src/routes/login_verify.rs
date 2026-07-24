@@ -25,6 +25,7 @@ use crate::auth::Auth;
 use crate::db;
 use crate::response::error_response;
 use crate::response::success_response;
+use crate::validation;
 use crate::AppState;
 use crate::session::session_error_into_response;
 
@@ -41,7 +42,11 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LoginVerifyForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let auth = Auth::new(&form.uuid, &form.cipher_hex)?;
+    let uuid = validation::validate_uuid(&form.uuid)?;
+    let cipher_hex = validation::validate_cipher_hex(&form.cipher_hex)?;
+    let mii = validation::validate_mii(form.mii)?;
+
+    let auth = Auth::from_uuid(uuid, cipher_hex.to_string());
 
     // Get user from DB for access_token
     let user = db::get_user_by_uuid(&state.db, &auth.uuid)
@@ -50,7 +55,7 @@ pub async fn handler(
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
     // Build optional UserInfo from the mii query parameter
-    let user_info = form.mii.map(|mii| {
+    let user_info = mii.map(|mii| {
         let mii_name = crate::utils::mii_utils::get_mii_name(&mii).ok();
         UserInfo {
             mii: Some(mii),

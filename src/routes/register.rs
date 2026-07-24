@@ -25,6 +25,7 @@ use crate::crypto;
 use crate::db;
 use crate::response::error_response;
 use crate::response::success_response;
+use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -37,12 +38,8 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<RegisterForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    if form.code.is_empty() {
-        return Err(error_response(400, "missing_code", "Code is required"));
-    }
-
     // Exchange the code with Discord for tokens via DiscordSocialRpcAdmin.
-    let code = form.code.clone();
+    let code = validation::validate_code(&form.code)?.to_owned();
     let redirect_uri = state.config.redirect_uri.clone();
     let discord_rpc = state.discord_rpc.clone();
     
