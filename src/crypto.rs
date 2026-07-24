@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 use rand::RngExt;
 use sha2::{Digest, Sha256};
@@ -98,8 +97,7 @@ pub fn verify_activity_auth(
     fields: &[&str],
     key: &[u8; 32],
 ) -> Result<u64, CryptoError> {
-    let ciphertext = hex::decode(auth_hex)
-        .map_err(|_| CryptoError::InvalidHex)?;
+    let ciphertext = hex::decode(auth_hex).map_err(|_| CryptoError::InvalidHex)?;
 
     if ciphertext.len() != 48 {
         return Err(CryptoError::WrongInputSize);
@@ -130,7 +128,9 @@ pub fn url_encode_3ds(s: &str) -> String {
     let mut out = String::new();
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{:02X}", b)),
         }

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -27,10 +26,10 @@ use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use activity_generator::UserInfo;
 use crate::crypto::url_encode_3ds;
-use crate::{AppState, auth::Auth, crypto};
 use crate::response::error_response;
+use crate::{auth::Auth, crypto, AppState};
+use activity_generator::UserInfo;
 
 /// Timeout for pending verification sessions (seconds).
 const PENDING_TIMEOUT_SECS: u64 = 30;
@@ -58,15 +57,19 @@ pub enum SessionState {
 impl std::fmt::Debug for SessionState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PendingVerify { nonce, .. } => {
-                f.debug_struct("PendingVerify").field("nonce", nonce).finish()
-            }
-            Self::Active { last_activity, user_info, .. } => {
-                f.debug_struct("Active")
-                    .field("last_activity", last_activity)
-                    .field("user_info", user_info)
-                    .finish()
-            }
+            Self::PendingVerify { nonce, .. } => f
+                .debug_struct("PendingVerify")
+                .field("nonce", nonce)
+                .finish(),
+            Self::Active {
+                last_activity,
+                user_info,
+                ..
+            } => f
+                .debug_struct("Active")
+                .field("last_activity", last_activity)
+                .field("user_info", user_info)
+                .finish(),
         }
     }
 }
@@ -102,11 +105,15 @@ impl std::error::Error for SessionError {}
 impl IntoResponse for SessionError {
     fn into_response(self) -> Response {
         match self {
-            Self::SessionNotFound | Self::PendingNotActive => {
-                error_response(401, "session_expired", "Session expired or not found. Please re-login.")
-            }
+            Self::SessionNotFound | Self::PendingNotActive => error_response(
+                401,
+                "session_expired",
+                "Session expired or not found. Please re-login.",
+            ),
             Self::AuthFailed(_) => error_response(403, "auth_failed", &self.to_string()),
-            Self::ReplayDetected { .. } => error_response(403, "replay_detected", &self.to_string()),
+            Self::ReplayDetected { .. } => {
+                error_response(403, "replay_detected", &self.to_string())
+            }
             Self::Cooldown { .. } => error_response(429, "cooldown", &self.to_string()),
             Self::Other(_) => error_response(400, "error", &self.to_string()),
         }
@@ -180,12 +187,15 @@ impl SessionManager {
         }
         *count += 1;
 
-        sessions.insert(uuid, SessionState::PendingVerify {
-            nonce,
-            aes_key,
-            created_at: Instant::now(),
-            client_ip,
-        });
+        sessions.insert(
+            uuid,
+            SessionState::PendingVerify {
+                nonce,
+                aes_key,
+                created_at: Instant::now(),
+                client_ip,
+            },
+        );
 
         Ok(nonce)
     }
@@ -200,19 +210,26 @@ impl SessionManager {
         user_info: Option<UserInfo>,
     ) -> Result<u64, SessionError> {
         // Remove pending session first (IP counter will be decremented on failure too)
-        let state = self.remove_session_with_ip(&auth.uuid).await
+        let state = self
+            .remove_session_with_ip(&auth.uuid)
+            .await
             .ok_or_else(|| SessionError::from("no pending session for this uuid"))?;
 
         let (nonce, aes_key, client_ip) = match state {
-            SessionState::PendingVerify { nonce, aes_key, client_ip, .. } => (nonce, aes_key, client_ip),
+            SessionState::PendingVerify {
+                nonce,
+                aes_key,
+                client_ip,
+                ..
+            } => (nonce, aes_key, client_ip),
             SessionState::Active { .. } => {
                 return Err("session is already active".into());
             }
         };
 
         // Decrypt nonce: 16 bytes ciphertext → 8 bytes nonce + PKCS7 padding
-        let cipher_bytes = hex::decode(auth.hex())
-            .map_err(|_| SessionError::from("invalid hex in cipher_hex"))?;
+        let cipher_bytes =
+            hex::decode(auth.hex()).map_err(|_| SessionError::from("invalid hex in cipher_hex"))?;
         if cipher_bytes.len() != 16 {
             return Err("cipher_hex must be 32 hex chars (16 bytes)".into());
         }
@@ -231,7 +248,8 @@ impl SessionManager {
             return Err("nonce mismatch".into());
         }
 
-        let client = discord_rpc.create_new_client(access_token)
+        let client = discord_rpc
+            .create_new_client(access_token)
             .map_err(|e| SessionError::from(format!("failed to create Discord client: {}", e)))?;
 
         let client = Arc::new(client);
@@ -239,19 +257,27 @@ impl SessionManager {
         let client_clone = client.clone();
         tokio::task::spawn_blocking(move || {
             let _ = client_clone.start_activity();
-        }).await.map_err(|e| SessionError::from(format!("spawn_blocking failed: {}", e)))?;
+        })
+        .await
+        .map_err(|e| SessionError::from(format!("spawn_blocking failed: {}", e)))?;
 
-        log::info!("session {}: Discord client created and gateway started", auth.uuid);
+        log::info!(
+            "session {}: Discord client created and gateway started",
+            auth.uuid
+        );
 
         let mut sessions = self.sessions.lock().await;
-        sessions.insert(auth.uuid, SessionState::Active {
-            client,
-            aes_key,
-            last_counter: AtomicU64::new(nonce),
-            last_activity: Instant::now() - Duration::from_secs(cooldown_secs + 1),
-            client_ip,
-            user_info,
-        });
+        sessions.insert(
+            auth.uuid,
+            SessionState::Active {
+                client,
+                aes_key,
+                last_counter: AtomicU64::new(nonce),
+                last_activity: Instant::now() - Duration::from_secs(cooldown_secs + 1),
+                client_ip,
+                user_info,
+            },
+        );
 
         Ok(nonce)
     }
@@ -265,13 +291,25 @@ impl SessionManager {
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, IpAddr, u64), SessionError> {
         let mut sessions = self.sessions.lock().await;
-        let session = sessions.get_mut(&auth.uuid)
+        let session = sessions
+            .get_mut(&auth.uuid)
             .ok_or(SessionError::SessionNotFound)?;
 
         let (client, aes_key, last_counter, last_activity, client_ip) = match session {
-            SessionState::Active { client, aes_key, last_counter, last_activity, client_ip, .. } => {
-                (client.clone(), *aes_key, last_counter.load(Ordering::SeqCst), *last_activity, *client_ip)
-            }
+            SessionState::Active {
+                client,
+                aes_key,
+                last_counter,
+                last_activity,
+                client_ip,
+                ..
+            } => (
+                client.clone(),
+                *aes_key,
+                last_counter.load(Ordering::SeqCst),
+                *last_activity,
+                *client_ip,
+            ),
             SessionState::PendingVerify { .. } => {
                 return Err(SessionError::PendingNotActive);
             }
@@ -279,7 +317,9 @@ impl SessionManager {
 
         let elapsed = last_activity.elapsed().as_secs();
         if elapsed < cooldown_secs {
-            return Err(SessionError::Cooldown { remaining: cooldown_secs - elapsed });
+            return Err(SessionError::Cooldown {
+                remaining: cooldown_secs - elapsed,
+            });
         }
 
         let good_counter = last_counter + 1;
@@ -297,11 +337,17 @@ impl SessionManager {
         fields: &[&str],
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, u64), SessionError> {
-        let (client, _client_ip, good_counter) =
-            self.authenticate_and_get_client(auth, fields, cooldown_secs).await?;
+        let (client, _client_ip, good_counter) = self
+            .authenticate_and_get_client(auth, fields, cooldown_secs)
+            .await?;
 
         let mut sessions = self.sessions.lock().await;
-        if let Some(SessionState::Active { last_counter, last_activity, .. }) = sessions.get_mut(&auth.uuid) {
+        if let Some(SessionState::Active {
+            last_counter,
+            last_activity,
+            ..
+        }) = sessions.get_mut(&auth.uuid)
+        {
             last_counter.store(good_counter, Ordering::SeqCst);
             *last_activity = Instant::now();
         }
@@ -317,16 +363,27 @@ impl SessionManager {
         game_info: GameInfo,
         extra_info: Option<String>,
     ) -> Result<(), SessionError> {
-        let mut field = format!("titleid={}&name={}&publisher={}", game_info.title_id, url_encode_3ds(&game_info.name), url_encode_3ds(&game_info.publisher));
+        let mut field = format!(
+            "titleid={}&name={}&publisher={}",
+            game_info.title_id,
+            url_encode_3ds(&game_info.name),
+            url_encode_3ds(&game_info.publisher)
+        );
 
         if let Some(extra) = &extra_info {
-            log::info!("session {}: extra info provided: {:?}", auth.uuid, extra_info);
+            log::info!(
+                "session {}: extra info provided: {:?}",
+                auth.uuid,
+                extra_info
+            );
             field = format!("{}&extra={}", field, url_encode_3ds(extra.as_str()));
         }
 
         let fields = [field.as_str()];
 
-        let (client, _good_counter) = self.authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs).await?;
+        let (client, _good_counter) = self
+            .authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs)
+            .await?;
 
         let user_info = {
             let sessions = self.sessions.lock().await;
@@ -336,43 +393,45 @@ impl SessionManager {
             }
         };
 
-        let activity = state.activity_generator.build_activity(&user_info.unwrap_or_default(), &game_info, &extra_info).await;
+        let activity = state
+            .activity_generator
+            .build_activity(&user_info.unwrap_or_default(), &game_info, &extra_info)
+            .await;
 
         let client_set = client.clone();
         tokio::task::spawn_blocking(move || {
             let _ = client_set.set_activity(activity);
-        }).await.map_err(|e| SessionError::from(format!("set_activity spawn failed: {}", e)))?;
+        })
+        .await
+        .map_err(|e| SessionError::from(format!("set_activity spawn failed: {}", e)))?;
 
         Ok(())
     }
 
     /// Heartbeat: verify session + auth + cooldown, update counter and last_activity,
     /// but do NOT change the Discord activity.
-    pub async fn heartbeat(
-        &self,
-        auth: &Auth,
-        cooldown_secs: u64,
-    ) -> Result<(), SessionError> {
+    pub async fn heartbeat(&self, auth: &Auth, cooldown_secs: u64) -> Result<(), SessionError> {
         let fields: [&str; 0] = [];
-        let (_client, _good_counter) = self.authenticate_and_tick(auth, &fields, cooldown_secs).await?;
+        let (_client, _good_counter) = self
+            .authenticate_and_tick(auth, &fields, cooldown_secs)
+            .await?;
         Ok(())
     }
 
     /// Stop the Discord activity for an active session and remove the session.
-    pub async fn stop_activity(
-        &self,
-        auth: &Auth,
-        cooldown_secs: u64,
-    ) -> Result<(), SessionError> {
+    pub async fn stop_activity(&self, auth: &Auth, cooldown_secs: u64) -> Result<(), SessionError> {
         let fields = ["logout", "", ""];
 
-        let (client, _client_ip, _good_counter) =
-            self.authenticate_and_get_client(auth, &fields, cooldown_secs).await?;
+        let (client, _client_ip, _good_counter) = self
+            .authenticate_and_get_client(auth, &fields, cooldown_secs)
+            .await?;
 
         let client_stop = client.clone();
         tokio::task::spawn_blocking(move || {
             let _ = client_stop.stop_activity();
-        }).await.map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
+        })
+        .await
+        .map_err(|e| SessionError::from(format!("stop_activity spawn failed: {}", e)))?;
 
         self.remove_session_with_ip(&auth.uuid).await;
         log::info!("session {}: activity stopped by client (logout)", auth.uuid);
@@ -383,22 +442,21 @@ impl SessionManager {
     /// Get UUIDs of sessions that have exceeded the timeout.
     pub async fn get_expired_active_sessions(&self, timeout_secs: u64) -> Vec<Uuid> {
         let sessions = self.sessions.lock().await;
-        sessions.iter()
-            .filter_map(|(uuid, state)| {
-                match state {
-                    SessionState::Active { last_activity, .. } => {
-                        if last_activity.elapsed().as_secs() > timeout_secs {
-                            Some(*uuid)
-                        } else {
-                            None
-                        }
+        sessions
+            .iter()
+            .filter_map(|(uuid, state)| match state {
+                SessionState::Active { last_activity, .. } => {
+                    if last_activity.elapsed().as_secs() > timeout_secs {
+                        Some(*uuid)
+                    } else {
+                        None
                     }
-                    SessionState::PendingVerify { created_at, .. } => {
-                        if created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS {
-                            Some(*uuid)
-                        } else {
-                            None
-                        }
+                }
+                SessionState::PendingVerify { created_at, .. } => {
+                    if created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS {
+                        Some(*uuid)
+                    } else {
+                        None
                     }
                 }
             })
@@ -441,17 +499,27 @@ impl SessionState {
 pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
     match err {
         // Same message for both cases → no oracle, can't distinguish session states
-        SessionError::SessionNotFound | SessionError::PendingNotActive => {
-            error_response(401, "session_expired", "Session expired or not found. Please re-login.")
-        }
+        SessionError::SessionNotFound | SessionError::PendingNotActive => error_response(
+            401,
+            "session_expired",
+            "Session expired or not found. Please re-login.",
+        ),
         // Do NOT leak padding/integrity distinction → blocks padding oracle
         SessionError::AuthFailed(_) => {
-            let msg = if debug { err.to_string() } else { "Authentication failed".to_string() };
+            let msg = if debug {
+                err.to_string()
+            } else {
+                "Authentication failed".to_string()
+            };
             error_response(403, "auth_failed", &msg)
         }
         // Do not leak counter values
         SessionError::ReplayDetected { .. } => {
-            let msg = if debug { err.to_string() } else { "Replay detected".to_string() };
+            let msg = if debug {
+                err.to_string()
+            } else {
+                "Replay detected".to_string()
+            };
             error_response(403, "replay_detected", &msg)
         }
         // Cooldown remaining is useful for the client
@@ -459,7 +527,11 @@ pub fn session_error_into_response(err: SessionError, debug: bool) -> Response {
             error_response(429, "cooldown", &format!("Wait {} seconds", remaining))
         }
         SessionError::Other(msg) => {
-            let msg = if debug { msg } else { "Request failed".to_string() };
+            let msg = if debug {
+                msg
+            } else {
+                "Request failed".to_string()
+            };
             error_response(400, "error", &msg)
         }
     }

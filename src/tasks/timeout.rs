@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,23 +22,24 @@ use log::info;
 use crate::session::SessionManager;
 
 /// Periodic cleanup of sessions inactive for `timeout_secs`.
-pub async fn run(
-    session_manager: Arc<SessionManager>,
-    timeout_secs: u64,
-) {
+pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
     info!("timeout task started (timeout={}s)", timeout_secs);
 
     loop {
         tokio::time::sleep(Duration::from_secs(10)).await;
 
-        let expired = session_manager.get_expired_active_sessions(timeout_secs).await;
+        let expired = session_manager
+            .get_expired_active_sessions(timeout_secs)
+            .await;
 
         for uuid in expired {
             if let Some(client) = session_manager.get_client(&uuid).await {
                 let client_clone = client.clone();
                 tokio::task::spawn_blocking(move || {
                     let _ = client_clone.stop_activity();
-                }).await.ok();
+                })
+                .await
+                .ok();
             }
 
             session_manager.remove_session(&uuid).await;

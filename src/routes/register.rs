@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 
 use axum::{extract::State, Form};
@@ -41,17 +40,25 @@ pub async fn handler(
     let code = validation::validate_code(&form.code)?.to_owned();
     let redirect_uri = state.config.redirect_uri.clone();
     let discord_rpc = state.discord_rpc.clone();
-    
+
     let debug = state.config.debug_mode;
     let token_resp =
         tokio::task::spawn_blocking(move || discord_rpc.exchange_code(&code, &redirect_uri))
             .await
             .map_err(|e| {
-                let msg = if debug { format!("Spawn blocking failed: {}", e) } else { "Internal error".to_string() };
+                let msg = if debug {
+                    format!("Spawn blocking failed: {}", e)
+                } else {
+                    "Internal error".to_string()
+                };
                 error_response(500, "runtime_error", &msg)
             })?
             .map_err(|e| {
-                let msg = if debug { format!("Discord error: {}", e) } else { "Discord authentication failed".to_string() };
+                let msg = if debug {
+                    format!("Discord error: {}", e)
+                } else {
+                    "Discord authentication failed".to_string()
+                };
                 error_response(502, "discord_error", &msg)
             })?;
 
@@ -59,13 +66,20 @@ pub async fn handler(
     let client = reqwest::Client::new();
     let user_resp = client
         .get("https://discord.com/api/v10/users/@me")
-        .header("Authorization", format!("Bearer {}", token_resp.access_token))
+        .header(
+            "Authorization",
+            format!("Bearer {}", token_resp.access_token),
+        )
         .send()
         .await
         .map_err(|_e| error_response(502, "discord_error", "Failed to fetch Discord user"))?;
 
     if !user_resp.status().is_success() {
-        return Err(error_response(502, "discord_error", "Discord user endpoint failed"));
+        return Err(error_response(
+            502,
+            "discord_error",
+            "Discord user endpoint failed",
+        ));
     }
 
     #[derive(serde::Deserialize)]
@@ -73,7 +87,9 @@ pub async fn handler(
         id: String,
     }
 
-    let user_info: DiscordUserResponse = user_resp.json().await
+    let user_info: DiscordUserResponse = user_resp
+        .json()
+        .await
         .map_err(|_e| error_response(502, "discord_error", "Failed to parse Discord user"))?;
 
     let discord_id = &user_info.id;
@@ -86,7 +102,9 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database query failed"))?
     {
         // Returning user: preserve uuid and aes_key, update tokens only
-        let uuid = existing_user.uuid.parse::<Uuid>()
+        let uuid = existing_user
+            .uuid
+            .parse::<Uuid>()
             .map_err(|_e| error_response(500, "db_error", "Invalid stored UUID"))?;
 
         db::update_user_tokens(

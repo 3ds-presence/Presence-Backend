@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::fmt;
 
 #[derive(Debug)]
@@ -28,7 +27,11 @@ impl fmt::Display for MiiError {
         match self {
             MiiError::HexDecode(e) => write!(f, "Hex decode error: {}", e),
             MiiError::TooShort { expected, actual } => {
-                write!(f, "Mii data too short: expected at least {} bytes, got {}", expected, actual)
+                write!(
+                    f,
+                    "Mii data too short: expected at least {} bytes, got {}",
+                    expected, actual
+                )
             }
         }
     }

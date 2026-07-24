@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use uuid::Uuid;
 
 use crate::response::{error_response, AppError};
@@ -39,11 +38,20 @@ impl Auth {
     /// Parse and validate raw uuid/hex strings. Returns 400 if UUID is invalid.
     pub fn new(uuid_str: &str, hex: &str) -> Result<Self, AppError> {
         if uuid_str.is_empty() || hex.is_empty() {
-            return Err(AppError(Box::new(error_response(400, "missing_field", "uuid and hex are required"))));
+            return Err(AppError(Box::new(error_response(
+                400,
+                "missing_field",
+                "uuid and hex are required",
+            ))));
         }
 
-        let uuid = Uuid::parse_str(uuid_str)
-            .map_err(|_| AppError(Box::new(error_response(400, "invalid_uuid", "Invalid UUID format"))))?;
+        let uuid = Uuid::parse_str(uuid_str).map_err(|_| {
+            AppError(Box::new(error_response(
+                400,
+                "invalid_uuid",
+                "Invalid UUID format",
+            )))
+        })?;
 
         Ok(Self {
             uuid,

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 
 use axum::routing::post;
@@ -68,7 +67,10 @@ async fn main() {
     info!("Database initialized: {}", config.database_url);
 
     // Create the global DiscordSocialRpcAdmin instance
-    info!("DiscordSocialRpcAdmin initialized for app_id={}", config.client_id);
+    info!(
+        "DiscordSocialRpcAdmin initialized for app_id={}",
+        config.client_id
+    );
     let discord_rpc = DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
         .expect("Failed to create DiscordSocialRpcAdmin");
 
@@ -76,7 +78,12 @@ async fn main() {
     let session_manager = Arc::new(SessionManager::new());
 
     // Initialize activity generator (in-memory catalogue of game metadata)
-    let activity_generator = ActivityGenerator::new(&config.scripts_dir, &config.assets_base_url, &config.mii_generator_server, config.lua_pool_max);
+    let activity_generator = ActivityGenerator::new(
+        &config.scripts_dir,
+        &config.assets_base_url,
+        &config.mii_generator_server,
+        config.lua_pool_max,
+    );
 
     // Create shared state
     let state = Arc::new(AppState {
@@ -105,7 +112,10 @@ async fn main() {
         .route("/login", post(routes::login::handler))
         .route("/login/verify", post(routes::login_verify::handler))
         .route("/activity/set", post(routes::activity::set_handler))
-        .route("/activity/heartbeat", post(routes::activity::heartbeat_handler))
+        .route(
+            "/activity/heartbeat",
+            post(routes::activity::heartbeat_handler),
+        )
         .route("/logout", post(routes::logout::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))
         .with_state(state);
@@ -118,7 +128,5 @@ async fn main() {
         .await
         .expect("Failed to bind to address");
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server failed");
+    axum::serve(listener, app).await.expect("Server failed");
 }

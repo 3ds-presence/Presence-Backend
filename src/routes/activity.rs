@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 
 use activity_generator::info::GameInfo;
@@ -57,7 +56,8 @@ pub async fn set_handler(
         publisher,
     };
 
-    state.session_manager
+    state
+        .session_manager
         .update_activity(&state, &auth, game_info, extra)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
@@ -75,7 +75,8 @@ pub async fn heartbeat_handler(
 
     let auth = Auth::from_uuid(uuid, auth_hex.to_string());
 
-    state.session_manager
+    state
+        .session_manager
         .heartbeat(&auth, state.config.activity_cooldown_secs)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;

@@ -14,20 +14,19 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
-use activity_generator::UserInfo;
 use crate::auth::Auth;
 use crate::db;
 use crate::response::error_response;
 use crate::response::success_response;
+use crate::session::session_error_into_response;
 use crate::validation;
 use crate::AppState;
-use crate::session::session_error_into_response;
+use activity_generator::UserInfo;
 
 #[derive(Deserialize)]
 pub struct LoginVerifyForm {
@@ -60,8 +59,15 @@ pub async fn handler(
         }
     });
 
-    state.session_manager
-        .verify_and_activate(&auth, state.discord_rpc.rpc(), &user.access_token, state.config.activity_cooldown_secs, user_info)
+    state
+        .session_manager
+        .verify_and_activate(
+            &auth,
+            state.discord_rpc.rpc(),
+            &user.access_token,
+            state.config.activity_cooldown_secs,
+            user_info,
+        )
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 

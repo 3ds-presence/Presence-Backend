@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 
 use axum::{extract::State, Form};
@@ -42,7 +41,8 @@ pub async fn handler(
 
     let auth = Auth::from_uuid(uuid, auth_hex.to_string());
 
-    state.session_manager
+    state
+        .session_manager
         .stop_activity(&auth, 0)
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;

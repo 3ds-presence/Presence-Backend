@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -67,14 +66,16 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
 }
 
 /// Refresh a single user's token (RPC call is sync, so wrap in spawn_blocking).
-async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model, admin: &DiscordSocialRpcAdmin) {
+async fn refresh_user_token(
+    db: &DatabaseConnection,
+    user: &crate::models::Model,
+    admin: &DiscordSocialRpcAdmin,
+) {
     let admin = admin.clone();
     let refresh_token = user.refresh_token.clone();
 
-    let result = tokio::task::spawn_blocking(move || {
-        admin.refresh_user_token(&refresh_token)
-    })
-    .await;
+    let result =
+        tokio::task::spawn_blocking(move || admin.refresh_user_token(&refresh_token)).await;
 
     match result {
         Ok(Ok(resp)) => {
@@ -90,14 +91,14 @@ async fn refresh_user_token(db: &DatabaseConnection, user: &crate::models::Model
                 }
             };
 
-            if let Err(e) = db::update_user_tokens(
-                db,
-                &uuid,
-                &resp.access_token,
-                &new_refresh,
-                expires_at,
-            ).await {
-                warn!("token_refresh: failed to update tokens for {}: {}", user.uuid, e);
+            if let Err(e) =
+                db::update_user_tokens(db, &uuid, &resp.access_token, &new_refresh, expires_at)
+                    .await
+            {
+                warn!(
+                    "token_refresh: failed to update tokens for {}: {}",
+                    user.uuid, e
+                );
             } else {
                 info!("token_refresh: refreshed tokens for {}", user.uuid);
             }

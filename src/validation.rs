@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use uuid::Uuid;
 
 use crate::response::{error_response, AppError};
@@ -55,7 +54,10 @@ fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result
         return Err(AppError(Box::new(error_response(
             400,
             &format!("invalid_{}", field_name),
-            &format!("{} must be exactly {} hex characters", field_name, expected_len),
+            &format!(
+                "{} must be exactly {} hex characters",
+                field_name, expected_len
+            ),
         ))));
     }
     if !value.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -90,7 +92,13 @@ fn check_max_len(value: &str, max_len: usize, field_name: &str) -> Result<(), Ap
 /// Validate a UUID string (max 36 chars) and return the parsed `Uuid`.
 pub fn validate_uuid(uuid: &str) -> Result<Uuid, AppError> {
     check_max_len(uuid, UUID_MAX_LEN, "uuid")?;
-    Uuid::parse_str(uuid).map_err(|_| AppError(Box::new(error_response(400, "invalid_uuid", "Invalid UUID format"))))
+    Uuid::parse_str(uuid).map_err(|_| {
+        AppError(Box::new(error_response(
+            400,
+            "invalid_uuid",
+            "Invalid UUID format",
+        )))
+    })
 }
 
 /// Validate an auth_hex string (exactly 96 hex chars) and return it.
@@ -113,21 +121,39 @@ pub fn validate_aes_key_hex(hex: &str) -> Result<&str, AppError> {
 
 /// Validate a title ID (exactly 16 hex chars) and return it.
 pub fn validate_titleid(titleid: Option<String>) -> Result<String, AppError> {
-    let t = titleid.ok_or_else(|| AppError(Box::new(error_response(400, "missing_field", "titleid is required"))))?;
+    let t = titleid.ok_or_else(|| {
+        AppError(Box::new(error_response(
+            400,
+            "missing_field",
+            "titleid is required",
+        )))
+    })?;
     check_hex_exact(&t, TITLEID_LEN, "titleid")?;
     Ok(t)
 }
 
 /// Validate a game name (max 512 chars, non-empty) and return it.
 pub fn validate_name(name: Option<String>) -> Result<String, AppError> {
-    let n = name.ok_or_else(|| AppError(Box::new(error_response(400, "missing_field", "name is required"))))?;
+    let n = name.ok_or_else(|| {
+        AppError(Box::new(error_response(
+            400,
+            "missing_field",
+            "name is required",
+        )))
+    })?;
     check_max_len(&n, NAME_MAX_LEN, "name")?;
     Ok(n)
 }
 
 /// Validate a publisher name (max 256 chars, non-empty) and return it.
 pub fn validate_publisher(publisher: Option<String>) -> Result<String, AppError> {
-    let p = publisher.ok_or_else(|| AppError(Box::new(error_response(400, "missing_field", "publisher is required"))))?;
+    let p = publisher.ok_or_else(|| {
+        AppError(Box::new(error_response(
+            400,
+            "missing_field",
+            "publisher is required",
+        )))
+    })?;
     check_max_len(&p, PUBLISHER_MAX_LEN, "publisher")?;
     Ok(p)
 }
@@ -157,7 +183,11 @@ pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
             ))));
         }
         if !m.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(AppError(Box::new(error_response(400, "invalid_mii", "mii must contain only hex characters"))));
+            return Err(AppError(Box::new(error_response(
+                400,
+                "invalid_mii",
+                "mii must contain only hex characters",
+            ))));
         }
     }
     Ok(mii)

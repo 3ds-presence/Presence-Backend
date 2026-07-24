@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::env;
 
 /// Server configuration loaded from environment variables / .env file.
@@ -51,12 +50,9 @@ impl Config {
     /// Call this after `dotenvy::dotenv()`.
     pub fn from_env() -> Self {
         Self {
-            client_id: env::var("CLIENT_ID")
-                .expect("CLIENT_ID must be set in .env"),
-            client_secret: env::var("CLIENT_SECRET")
-                .expect("CLIENT_SECRET must be set in .env"),
-            redirect_uri: env::var("REDIRECT_URI")
-                .expect("REDIRECT_URI must be set in .env"),
+            client_id: env::var("CLIENT_ID").expect("CLIENT_ID must be set in .env"),
+            client_secret: env::var("CLIENT_SECRET").expect("CLIENT_SECRET must be set in .env"),
+            redirect_uri: env::var("REDIRECT_URI").expect("REDIRECT_URI must be set in .env"),
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:presence.db?mode=rwc".to_string()),
             activity_cooldown_secs: env::var("ACTIVITY_COOLDOWN_SECS")
@@ -67,12 +63,10 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(8),
-            listen_addr: env::var("LISTEN_ADDR")
-                .unwrap_or_else(|_| "0.0.0.0:5555".to_string()),
+            listen_addr: env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:5555".to_string()),
             assets_base_url: env::var("ASSETS_BASE_URL")
                 .expect("ASSETS_BASE_URL must be set in .env"),
-            scripts_dir: env::var("SCRIPTS_DIR")
-                .unwrap_or_else(|_| "/app/scripts".to_string()),
+            scripts_dir: env::var("SCRIPTS_DIR").unwrap_or_else(|_| "/app/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
             lua_pool_max: env::var("LUA_POOL_MAX")

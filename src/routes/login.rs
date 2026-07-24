@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -46,17 +45,21 @@ pub async fn handler(
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
     if user.aes_key.len() != 32 {
-        return Err(error_response(500, "crypto_error", "Invalid AES key in database"));
+        return Err(error_response(
+            500,
+            "crypto_error",
+            "Invalid AES key in database",
+        ));
     }
     let mut aes_key = [0u8; 32];
     aes_key.copy_from_slice(&user.aes_key);
 
-    let client_ip = extract_real_ip(&headers)
-        .map_err(|e| error_response(400, "missing_ip", e))?;
+    let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
 
     info!("Login request for UUID {} from IP {}", uuid, client_ip);
 
-    let nonce = state.session_manager
+    let nonce = state
+        .session_manager
         .create_pending(uuid, aes_key, client_ip, state.config.max_clients_per_ip)
         .await
         .map_err(|e| error_response(429, "rate_limited", e))?;
