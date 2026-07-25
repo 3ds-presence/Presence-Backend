@@ -118,43 +118,31 @@ pub fn validate_aes_key_hex(hex: &str) -> Result<&str, AppError> {
     Ok(hex)
 }
 
-/// Validate a title ID (exactly 16 hex chars) and return it.
-pub fn validate_titleid(titleid: Option<String>) -> Result<String, AppError> {
-    let t = titleid.ok_or_else(|| {
-        AppError(Box::new(error_response(
-            400,
-            "missing_field",
-            "titleid is required",
-        )))
-    })?;
-    check_hex_exact(&t, TITLEID_LEN, "titleid")?;
-    Ok(t)
+/// Validate a title ID (exactly 16 hex chars if present).
+/// Returns `Ok(None)` if the field is absent.
+pub fn validate_titleid(titleid: Option<String>) -> Result<Option<String>, AppError> {
+    if let Some(ref t) = titleid {
+        check_hex_exact(t, TITLEID_LEN, "titleid")?;
+    }
+    Ok(titleid)
 }
 
-/// Validate a game name (max 512 chars, non-empty) and return it.
-pub fn validate_name(name: Option<String>) -> Result<String, AppError> {
-    let n = name.ok_or_else(|| {
-        AppError(Box::new(error_response(
-            400,
-            "missing_field",
-            "name is required",
-        )))
-    })?;
-    check_max_len(&n, NAME_MAX_LEN, "name")?;
-    Ok(n)
+/// Validate a game name (max 512 chars, non-empty if present).
+/// Returns `Ok(None)` if the field is absent.
+pub fn validate_name(name: Option<String>) -> Result<Option<String>, AppError> {
+    if let Some(ref n) = name {
+        check_max_len(n, NAME_MAX_LEN, "name")?;
+    }
+    Ok(name)
 }
 
-/// Validate a publisher name (max 256 chars, non-empty) and return it.
-pub fn validate_publisher(publisher: Option<String>) -> Result<String, AppError> {
-    let p = publisher.ok_or_else(|| {
-        AppError(Box::new(error_response(
-            400,
-            "missing_field",
-            "publisher is required",
-        )))
-    })?;
-    check_max_len(&p, PUBLISHER_MAX_LEN, "publisher")?;
-    Ok(p)
+/// Validate a publisher name (max 256 chars, non-empty if present).
+/// Returns `Ok(None)` if the field is absent.
+pub fn validate_publisher(publisher: Option<String>) -> Result<Option<String>, AppError> {
+    if let Some(ref p) = publisher {
+        check_max_len(p, PUBLISHER_MAX_LEN, "publisher")?;
+    }
+    Ok(publisher)
 }
 
 /// Validate extra data (max 1024 chars, optional) and return it.

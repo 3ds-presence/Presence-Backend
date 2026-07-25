@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use activity_generator::info::GameInfo;
 use axum::response::{IntoResponse, Response};
-use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
+use discord_social_rpc::{Activity, DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -357,33 +357,40 @@ impl SessionManager {
         &self,
         state: &AppState,
         auth: &Auth,
-        game_info: GameInfo,
+        game_info: Option<GameInfo>,
         extra_info: Option<String>,
     ) -> Result<(), SessionError> {
-        let field = Self::build_field_string(&game_info, extra_info.as_deref());
+        let field = Self::build_field_string(game_info.as_ref(), extra_info.as_deref());
         let fields = [field.as_str()];
         let (client, _good_counter) = self
             .authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs)
             .await?;
         let user_info = self.fetch_user_info(auth).await;
-        let activity = state
-            .activity_generator
-            .build_activity(&user_info.unwrap_or_default(), &game_info, &extra_info)
-            .await;
+
+        let activity = if let Some(game_info) = &game_info {
+            state
+                .activity_generator
+                .build_activity(&user_info.unwrap_or_default(), game_info, &extra_info)
+                .await
+        } else {
+            Activity::default()
+        };
         self.spawn_set_activity(client, activity).await
     }
 
-    fn build_field_string(game_info: &GameInfo, extra_info: Option<&str>) -> String {
-        let mut field = format!(
-            "titleid={}&name={}&publisher={}",
-            game_info.title_id,
-            url_encode_3ds(&game_info.name),
-            url_encode_3ds(&game_info.publisher)
-        );
-        if let Some(extra) = extra_info {
-            field = format!("{}&extra={}", field, url_encode_3ds(extra));
+    fn build_field_string(game_info: Option<&GameInfo>, extra_info: Option<&str>) -> String {
+        let base = game_info.map_or_else(String::new, |info| {
+            format!(
+                "titleid={}&name={}&publisher={}",
+                url_encode_3ds(&info.title_id),
+                url_encode_3ds(&info.name),
+                url_encode_3ds(&info.publisher)
+            )
+        });
+        match extra_info {
+            Some(extra) => format!("{}&extra={}", base, url_encode_3ds(extra)),
+            None => base,
         }
-        field
     }
 
     async fn fetch_user_info(&self, auth: &Auth) -> Option<UserInfo> {

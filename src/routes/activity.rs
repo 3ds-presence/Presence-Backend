@@ -21,7 +21,7 @@ use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
-use crate::response::success_response;
+use crate::response::{success_response, AppError};
 use crate::session::session_error_into_response;
 use crate::validation;
 use crate::AppState;
@@ -50,11 +50,7 @@ pub async fn set_handler(
     let extra = validation::validate_extra(form.extra)?;
 
     let auth = Auth::from_uuid(uuid, auth_hex.to_string());
-    let game_info = GameInfo {
-        title_id: titleid,
-        name,
-        publisher,
-    };
+    let game_info = generate_game_info(titleid, name, publisher, extra.as_ref())?;
 
     state
         .session_manager
@@ -63,6 +59,49 @@ pub async fn set_handler(
         .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
 
     Ok(success_response("success=true"))
+}
+
+/// Build an optional `GameInfo` from validated form fields.
+///
+/// If at least one of `titleid`, `name`, `publisher` or `extra` is present,
+/// then all of `titleid`, `name` and `publisher` must be present too.
+/// Returns `Ok(None)` when all fields are absent (only `uuid` + `auth_hex`).
+fn generate_game_info(
+    titleid: Option<String>,
+    name: Option<String>,
+    publisher: Option<String>,
+    extra: Option<&String>,
+) -> Result<Option<GameInfo>, AppError> {
+    if titleid.is_some() || name.is_some() || publisher.is_some() || extra.is_some() {
+        let titleid_val = titleid.ok_or_else(|| {
+            AppError(Box::new(crate::response::error_response(
+                400,
+                "incomplete_fields",
+                "titleid, name and publisher must all be provided together",
+            )))
+        })?;
+        let name_val = name.ok_or_else(|| {
+            AppError(Box::new(crate::response::error_response(
+                400,
+                "incomplete_fields",
+                "titleid, name and publisher must all be provided together",
+            )))
+        })?;
+        let publisher_val = publisher.ok_or_else(|| {
+            AppError(Box::new(crate::response::error_response(
+                400,
+                "incomplete_fields",
+                "titleid, name and publisher must all be provided together",
+            )))
+        })?;
+        Ok(Some(GameInfo {
+            title_id: titleid_val,
+            name: name_val,
+            publisher: publisher_val,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 /// POST /activity/heartbeat — Keep session alive without changing activity.
