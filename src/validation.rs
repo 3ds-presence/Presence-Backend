@@ -172,7 +172,9 @@ pub fn validate_extra(extra: Option<String>) -> Result<Option<String>, AppError>
 }
 
 /// Validate a Mii hex string (max 192 hex chars, optional) and return it.
+/// Empty or invalid Miis are silently treated as `None`.
 pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
+    let mii = mii.filter(|m| !m.is_empty());
     if let Some(ref m) = mii {
         if m.len() > MII_MAX_LEN {
             return Err(AppError(Box::new(error_response(

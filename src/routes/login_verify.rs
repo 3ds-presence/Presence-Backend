@@ -42,7 +42,7 @@ pub async fn handler(
 ) -> Result<axum::response::Response, axum::response::Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
     let cipher_hex = validation::validate_cipher_hex(&form.cipher_hex)?;
-    let mii = validation::validate_mii(form.mii).unwrap_or(None);
+    let mii = validation::validate_mii(form.mii)?;
 
     let auth = Auth::from_uuid(uuid, cipher_hex.to_string());
 
