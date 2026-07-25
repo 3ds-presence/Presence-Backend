@@ -107,7 +107,6 @@ fn init_activity_generator(config: &Config) -> ActivityGenerator {
         &config.scripts_dir,
         &config.assets_base_url,
         &config.mii_generator_server,
-        config.lua_pool_max,
     )
 }
 

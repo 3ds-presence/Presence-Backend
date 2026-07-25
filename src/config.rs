@@ -39,8 +39,6 @@ pub struct Config {
     pub scripts_dir: String,
     /// URL of the Mii generator server (e.g. "<http://localhost:8080/miis>/").
     pub mii_generator_server: String,
-    /// Maximum number of Lua VMs to keep in the pool for activity scripts (0 = default 64).
-    pub lua_pool_max: usize,
     /// Whether to expose detailed error messages (set to true when `RUST_LOG=debug`).
     pub debug_mode: bool,
 }
@@ -69,10 +67,6 @@ impl Config {
             scripts_dir: env::var("SCRIPTS_DIR").unwrap_or_else(|_| "/app/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
-            lua_pool_max: env::var("LUA_POOL_MAX")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(64),
             debug_mode: env::var("RUST_LOG")
                 .is_ok_and(|v| v.to_lowercase().contains("debug")),
         }
