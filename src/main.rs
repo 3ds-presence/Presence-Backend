@@ -93,12 +93,26 @@ async fn init_database(config: &Config) -> DatabaseConnection {
 
 /// Initialize the Discord Social RPC admin client.
 fn init_discord_rpc(config: &Config) -> DiscordSocialRpcAdmin {
-    info!(
-        "DiscordSocialRpcAdmin initialized for app_id={}",
-        config.client_id
-    );
-    DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
+    if let (Some(cap), Some(batch)) = (config.cache_capacity, config.cache_evict_batch) {
+        info!(
+            "DiscordSocialRpcAdmin initialized for app_id={} with custom cache (capacity={}, evict_batch={})",
+            config.client_id, cap, batch
+        );
+        DiscordSocialRpcAdmin::new_custom_cached(
+            &config.client_id,
+            &config.client_secret,
+            cap,
+            batch,
+        )
         .expect("Failed to create DiscordSocialRpcAdmin")
+    } else {
+        info!(
+            "DiscordSocialRpcAdmin initialized for app_id={} (default, no custom cache)",
+            config.client_id
+        );
+        DiscordSocialRpcAdmin::new(&config.client_id, &config.client_secret)
+            .expect("Failed to create DiscordSocialRpcAdmin")
+    }
 }
 
 /// Initialize the activity generator for building Discord Presence.

@@ -407,7 +407,7 @@ impl SessionManager {
         activity: discord_social_rpc::Activity,
     ) -> Result<(), SessionError> {
         tokio::task::spawn_blocking(move || {
-            let _ = client.set_activity(activity);
+            let _ = client.set_activity(&activity);
         })
         .await
         .map_err(|e| SessionError::from(format!("set_activity spawn failed: {e}")))?;

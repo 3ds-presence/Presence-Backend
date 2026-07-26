@@ -41,6 +41,10 @@ pub struct Config {
     pub mii_generator_server: String,
     /// Whether to expose detailed error messages (set to true when `RUST_LOG=debug`).
     pub debug_mode: bool,
+    /// Custom cache capacity for `DiscordSocialRpc` (optional — uses default `::new()` if `None`).
+    pub cache_capacity: Option<usize>,
+    /// Custom cache eviction batch size for `DiscordSocialRpc` (optional — uses default `::new()` if `None`).
+    pub cache_evict_batch: Option<usize>,
 }
 
 impl Config {
@@ -69,6 +73,8 @@ impl Config {
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
             debug_mode: env::var("RUST_LOG")
                 .is_ok_and(|v| v.to_lowercase().contains("debug")),
+            cache_capacity: env::var("CACHE_CAPACITY").ok().and_then(|s| s.parse().ok()),
+            cache_evict_batch: env::var("CACHE_EVICT_BATCH").ok().and_then(|s| s.parse().ok()),
         }
     }
 }
