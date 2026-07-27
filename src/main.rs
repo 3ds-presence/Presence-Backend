@@ -58,7 +58,7 @@ async fn main() {
     let db = init_database(&config).await;
     let discord_rpc = init_discord_rpc(&config);
     let session_manager = Arc::new(SessionManager::new());
-    let activity_generator = init_activity_generator(&config);
+    let activity_generator = init_activity_generator(&config).await;
     let state = build_state(
         &config,
         db,
@@ -116,12 +116,13 @@ fn init_discord_rpc(config: &Config) -> DiscordSocialRpcAdmin {
 }
 
 /// Initialize the activity generator for building Discord Presence.
-fn init_activity_generator(config: &Config) -> ActivityGenerator {
+async fn init_activity_generator(config: &Config) -> ActivityGenerator {
     ActivityGenerator::new(
         &config.scripts_dir,
         &config.assets_base_url,
         &config.mii_generator_server,
     )
+    .await
 }
 
 /// Build the shared application state.
