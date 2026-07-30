@@ -21,7 +21,9 @@ use discord_social_rpc::DiscordSocialRpcAdmin;
 use log::{info, warn};
 use sea_orm::DatabaseConnection;
 
+use crate::crypto;
 use crate::db;
+use crate::models;
 
 /// Refresh Discord `OAuth2` tokens before they expire (runs every hour).
 pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
@@ -66,8 +68,8 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
 /// Spawn a user refresh task with semaphore acquisition.
 fn spawn_user_refresh(
     sem_clone: Arc<tokio::sync::Semaphore>,
-    db_clone: sea_orm::DatabaseConnection,
-    user: crate::models::Model,
+    db_clone: DatabaseConnection,
+    user: models::Model,
     admin_clone: DiscordSocialRpcAdmin,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -79,7 +81,7 @@ fn spawn_user_refresh(
 /// Refresh a single user's token (RPC call is sync, so wrap in `spawn_blocking`).
 async fn refresh_user_token(
     db: &DatabaseConnection,
-    user: &crate::models::Model,
+    user: &models::Model,
     admin: &DiscordSocialRpcAdmin,
 ) {
     let admin = admin.clone();
@@ -96,10 +98,10 @@ async fn refresh_user_token(
 
 async fn apply_refresh(
     db: &DatabaseConnection,
-    user: &crate::models::Model,
+    user: &models::Model,
     resp: &discord_social_rpc::TokenRefreshResponse,
 ) {
-    let now = crate::crypto::now_secs();
+    let now = crypto::now_secs();
     let expires_at = now + i64::try_from(resp.expires_in).unwrap();
     let new_refresh = resp
         .refresh_token

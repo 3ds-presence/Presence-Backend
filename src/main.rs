@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
@@ -69,6 +69,7 @@ async fn main() {
 
     spawn_timeout_task(session_manager.clone());
     spawn_token_refresh_task(&state);
+    spawn_cleanup_task(state.db.clone());
 
     let addr = state.config.listen_addr.clone();
     let app = build_router(state);
@@ -158,10 +159,18 @@ fn spawn_token_refresh_task(state: &Arc<AppState>) {
     });
 }
 
+/// Spawn the background task that deletes inactive accounts.
+fn spawn_cleanup_task(db: sea_orm::DatabaseConnection) {
+    tokio::spawn(async move {
+        tasks::cleanup::run(db).await;
+    });
+}
+
 /// Build the Axum router with all routes.
 fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/register", post(routes::register::handler))
+        .route("/confirm-consent", post(routes::confirm_consent::handler))
         .route("/login", post(routes::login::handler))
         .route("/login/verify", post(routes::login_verify::handler))
         .route("/activity/set", post(routes::activity::set_handler))
@@ -171,6 +180,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/logout", post(routes::logout::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))
+        .route("/account/delete", post(routes::delete_account::handler))
+        .route("/account/export", get(routes::export_data::handler))
         .with_state(state)
 }
 

@@ -59,6 +59,7 @@ pub async fn create_user(params: CreateUserParams<'_>) -> Result<(), DbErr> {
         refresh_token: Set(params.refresh_token.to_string()),
         token_expires_at: Set(params.token_expires_at),
         created_at: Set(params.created_at),
+        last_connected: Set(params.created_at),
     };
     user.insert(params.db).await?;
     Ok(())
@@ -142,4 +143,46 @@ pub async fn get_users_needing_refresh(
         .filter(models::Column::TokenExpiresAt.lte(threshold))
         .all(db)
         .await
+}
+
+/// Delete a user by UUID.
+pub async fn delete_user(db: &DatabaseConnection, uuid: &Uuid) -> Result<(), DbErr> {
+    models::Entity::delete_many()
+        .filter(models::Column::Uuid.eq(uuid.to_string()))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+/// Update the `last_connected` timestamp for a user.
+pub async fn update_user_last_connected(
+    db: &DatabaseConnection,
+    uuid: &Uuid,
+    now: i64,
+) -> Result<(), DbErr> {
+    let user: Option<models::Model> = models::Entity::find()
+        .filter(models::Column::Uuid.eq(uuid.to_string()))
+        .one(db)
+        .await?;
+
+    if let Some(user) = user {
+        let mut active: models::ActiveModel = user.into();
+        active.last_connected = Set(now);
+        active.update(db).await?;
+    }
+
+    Ok(())
+}
+
+/// Delete users inactive for more than the given number of seconds.
+pub async fn delete_inactive_users(
+    db: &DatabaseConnection,
+    inactive_threshold_secs: i64,
+) -> Result<u64, DbErr> {
+    let cutoff = chrono::Utc::now().timestamp() - inactive_threshold_secs;
+    let result = models::Entity::delete_many()
+        .filter(models::Column::LastConnected.lt(cutoff))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
 }

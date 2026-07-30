@@ -17,11 +17,12 @@
 use std::sync::Arc;
 
 use activity_generator::info::GameInfo;
+use axum::response::Response;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
-use crate::response::{success_response, AppError};
+use crate::response::{error_response, success_response, AppError};
 use crate::session::session_error_into_response;
 use crate::validation;
 use crate::AppState;
@@ -40,7 +41,7 @@ pub struct ActivityForm {
 pub async fn set_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
-) -> Result<axum::response::Response, axum::response::Response> {
+) -> Result<Response, Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
     let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
 
@@ -74,21 +75,21 @@ fn generate_game_info(
 ) -> Result<Option<GameInfo>, AppError> {
     if titleid.is_some() || name.is_some() || publisher.is_some() || extra.is_some() {
         let titleid_val = titleid.ok_or_else(|| {
-            AppError(Box::new(crate::response::error_response(
+            AppError(Box::new(error_response(
                 400,
                 "incomplete_fields",
                 "titleid, name and publisher must all be provided together",
             )))
         })?;
         let name_val = name.ok_or_else(|| {
-            AppError(Box::new(crate::response::error_response(
+            AppError(Box::new(error_response(
                 400,
                 "incomplete_fields",
                 "titleid, name and publisher must all be provided together",
             )))
         })?;
         let publisher_val = publisher.ok_or_else(|| {
-            AppError(Box::new(crate::response::error_response(
+            AppError(Box::new(error_response(
                 400,
                 "incomplete_fields",
                 "titleid, name and publisher must all be provided together",
@@ -108,7 +109,7 @@ fn generate_game_info(
 pub async fn heartbeat_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
-) -> Result<axum::response::Response, axum::response::Response> {
+) -> Result<Response, Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
     let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
 

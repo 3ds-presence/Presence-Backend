@@ -16,14 +16,15 @@
 
 use std::sync::Arc;
 
+use axum::response::Response;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
 use crate::db;
-use crate::response::error_response;
-use crate::response::success_response;
+use crate::response::{error_response, success_response};
 use crate::session::session_error_into_response;
+use crate::utils::mii_utils;
 use crate::validation;
 use crate::AppState;
 use activity_generator::UserInfo;
@@ -39,7 +40,7 @@ pub struct LoginVerifyForm {
 pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LoginVerifyForm>,
-) -> Result<axum::response::Response, axum::response::Response> {
+) -> Result<Response, Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
     let cipher_hex = validation::validate_cipher_hex(&form.cipher_hex)?;
     let mii = validation::validate_mii(form.mii)?;
@@ -52,7 +53,7 @@ pub async fn handler(
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
     let user_info = mii.map(|mii| {
-        let mii_name = crate::utils::mii_utils::get_mii_name(&mii).ok();
+        let mii_name = mii_utils::get_mii_name(&mii).ok();
         UserInfo {
             mii: Some(mii),
             mii_name,

@@ -33,6 +33,8 @@ use activity_generator::UserInfo;
 
 /// Timeout for pending verification sessions (seconds).
 const PENDING_TIMEOUT_SECS: u64 = 30;
+/// Timeout for pending consent sessions (seconds).
+const PENDING_CONSENT_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
 /// State of a session during the login flow.
 pub enum SessionState {
@@ -42,6 +44,15 @@ pub enum SessionState {
         aes_key: [u8; 32],
         created_at: Instant,
         client_ip: IpAddr,
+    },
+    /// Waiting for the user to accept the privacy policy (RGPD consent).
+    PendingConsent {
+        discord_id: String,
+        access_token: String,
+        refresh_token: String,
+        token_expires_at: i64,
+        temp_token: Uuid,
+        created_at: Instant,
     },
     /// Session is active — `DiscordRpcClient` is connected and running.
     Active {
@@ -60,6 +71,11 @@ impl std::fmt::Debug for SessionState {
             Self::PendingVerify { nonce, .. } => f
                 .debug_struct("PendingVerify")
                 .field("nonce", nonce)
+                .finish(),
+            Self::PendingConsent { temp_token, created_at, .. } => f
+                .debug_struct("PendingConsent")
+                .field("temp_token", temp_token)
+                .field("created_at", created_at)
                 .finish(),
             Self::Active {
                 last_activity,
@@ -135,6 +151,8 @@ pub struct PromoteToActiveParams<'a> {
 pub struct SessionManager {
     sessions: Mutex<HashMap<Uuid, SessionState>>,
     ip_counts: Mutex<HashMap<IpAddr, usize>>,
+    /// Pending consent sessions indexed by `temp_token`.
+    consent_sessions: Mutex<HashMap<Uuid, Uuid>>, // temp_token -> session uuid
 }
 
 impl SessionManager {
@@ -142,6 +160,7 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             ip_counts: Mutex::new(HashMap::new()),
+            consent_sessions: Mutex::new(HashMap::new()),
         }
     }
 
@@ -156,15 +175,77 @@ impl SessionManager {
     }
 
     /// Remove a session by UUID, decrement IP counter, and return its state.
-    /// Only locks `ip_counts` if the session actually existed.
     async fn remove_session_with_ip(&self, uuid: &Uuid) -> Option<SessionState> {
         let state = self.sessions.lock().await.remove(uuid);
         if let Some(ref s) = state {
+            self.remove_consent_mapping(s).await;
             let mut ip_counts = self.ip_counts.lock().await;
             let ip = s.client_ip();
             Self::decrement_ip(&mut ip_counts, ip);
         }
         state
+    }
+
+    /// If the state is `PendingConsent`, remove the `temp_token` -> uuid mapping.
+    async fn remove_consent_mapping(&self, state: &SessionState) {
+        if let SessionState::PendingConsent { temp_token, .. } = state {
+            self.consent_sessions.lock().await.remove(temp_token);
+        }
+    }
+
+    /// Create a new pending consent session (after Discord OAuth, before user accepts RGPD).
+    pub async fn create_pending_consent(
+        &self,
+        discord_id: String,
+        access_token: String,
+        refresh_token: String,
+        token_expires_at: i64,
+    ) -> Uuid {
+        let temp_token = Uuid::new_v4();
+        let uuid = Uuid::new_v4();
+        self.sessions.lock().await.insert(
+            uuid,
+            SessionState::PendingConsent {
+                discord_id,
+                access_token,
+                refresh_token,
+                token_expires_at,
+                temp_token,
+                created_at: Instant::now(),
+            },
+        );
+        self.consent_sessions.lock().await.insert(temp_token, uuid);
+        log::info!("pending consent session created: temp_token={temp_token}");
+        temp_token
+    }
+
+    /// Confirm consent and return stored Discord data. Removes the pending session.
+    pub async fn confirm_consent(
+        &self,
+        temp_token: &Uuid,
+    ) -> Result<(String, String, String, i64), &'static str> {
+        let uuid = self
+            .consent_sessions
+            .lock()
+            .await
+            .remove(temp_token)
+            .ok_or("consent session not found or expired")?;
+        let state = self
+            .sessions
+            .lock()
+            .await
+            .remove(&uuid)
+            .ok_or("consent session not found")?;
+        match state {
+            SessionState::PendingConsent {
+                discord_id,
+                access_token,
+                refresh_token,
+                token_expires_at,
+                ..
+            } => Ok((discord_id, access_token, refresh_token, token_expires_at)),
+            _ => Err("unexpected session state"),
+        }
     }
 
     /// Create a new pending session with a nonce challenge.
@@ -238,6 +319,7 @@ impl SessionManager {
                 ..
             } => Ok((nonce, aes_key, client_ip)),
             SessionState::Active { .. } => Err("session is already active".into()),
+            SessionState::PendingConsent { .. } => Err("session is pending consent".into()),
         }
     }
 
@@ -322,6 +404,9 @@ impl SessionManager {
                 *client_ip,
             )),
             SessionState::PendingVerify { .. } => Err(SessionError::PendingNotActive),
+            SessionState::PendingConsent { .. } => {
+                Err(SessionError::from("session is pending consent, not active"))
+            }
         };
         drop(sessions);
         result
@@ -449,6 +534,9 @@ impl SessionManager {
             SessionState::PendingVerify { created_at, .. } => {
                 created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS
             }
+            SessionState::PendingConsent { created_at, .. } => {
+                created_at.elapsed().as_secs() > PENDING_CONSENT_TIMEOUT_SECS
+            }
         }
     }
 
@@ -474,6 +562,7 @@ impl SessionState {
     pub const fn client_ip(&self) -> IpAddr {
         match self {
             Self::PendingVerify { client_ip, .. } | Self::Active { client_ip, .. } => *client_ip,
+            Self::PendingConsent { .. } => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
         }
     }
 }

@@ -35,6 +35,9 @@ pub struct Model {
     pub token_expires_at: i64,
     /// Unix timestamp (seconds) when the account was created.
     pub created_at: i64,
+    /// Unix timestamp (seconds) of the last connection.
+    #[sea_orm(column_type = "BigInteger")]
+    pub last_connected: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
