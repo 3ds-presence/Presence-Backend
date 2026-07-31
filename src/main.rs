@@ -16,7 +16,8 @@
 
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::extract::DefaultBodyLimit;
+use axum::routing::post;
 use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
@@ -168,7 +169,11 @@ fn spawn_cleanup_task(db: sea_orm::DatabaseConnection) {
 
 /// Build the Axum router with all routes.
 fn build_router(state: Arc<AppState>) -> Router {
+    // Payloads are small forms; cap body size to avoid unbounded memory use.
+    const MAX_BODY_BYTES: usize = 16 * 1024;
+
     Router::new()
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .route("/register", post(routes::register::handler))
         .route("/confirm-consent", post(routes::confirm_consent::handler))
         .route("/login", post(routes::login::handler))
@@ -181,7 +186,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/logout", post(routes::logout::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))
         .route("/account/delete", post(routes::delete_account::handler))
-        .route("/account/export", get(routes::export_data::handler))
+        .route("/account/export", post(routes::export_data::handler))
         .with_state(state)
 }
 

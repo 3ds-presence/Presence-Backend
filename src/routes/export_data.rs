@@ -17,10 +17,12 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::response::Response;
+use axum::Form;
 use serde::{Deserialize, Serialize};
 
+use crate::crypto;
 use crate::db;
 use crate::models;
 use crate::response::{error_response, AppError};
@@ -28,7 +30,7 @@ use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize)]
-pub struct ExportQuery {
+pub struct ExportForm {
     pub uuid: String,
     pub aes_key_hex: String,
 }
@@ -41,25 +43,34 @@ pub struct ExportData {
     pub last_connected: i64,
 }
 
-/// GET /account/export — Export user data (without secrets).
+/// POST /account/export — Export user data (without secrets).
 pub async fn handler(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<ExportQuery>,
+    Form(form): Form<ExportForm>,
 ) -> Result<Response, Response> {
-    let uuid = validation::validate_uuid(&query.uuid)?;
-    validation::validate_aes_key_hex(&query.aes_key_hex)?;
+    let uuid = validation::validate_uuid(&form.uuid)?;
+    let supplied_key_hex = validation::validate_aes_key_hex(&form.aes_key_hex)?.to_owned();
+    let debug = state.config.debug_mode;
 
     let user = db::get_user_by_uuid(&state.db, &uuid)
         .await
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    let stored_hex = hex::encode(&user.aes_key);
-    if stored_hex != query.aes_key_hex {
-        return Err(error_response(403, "auth_failed", "AES key does not match"));
+    let Ok(supplied_key) = hex::decode(&supplied_key_hex) else {
+        return Err(error_response(400, "auth_failed", "AES key does not match"));
+    };
+
+    if !crypto::constant_time_eq_bytes(&user.aes_key, &supplied_key) {
+        let msg = if debug {
+            "AES key does not match".to_string()
+        } else {
+            "Authentication failed".to_string()
+        };
+        return Err(error_response(403, "auth_failed", &msg));
     }
 
-    let json = build_export_json(&user, state.config.debug_mode)?;
+    let json = build_export_json(&user, debug)?;
     Ok(build_json_response(&json))
 }
 

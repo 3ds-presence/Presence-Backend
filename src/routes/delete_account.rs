@@ -21,14 +21,16 @@ use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
+use crate::crypto;
 use crate::db;
 use crate::response::{error_response, success_response};
+use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct DeleteForm {
     pub uuid: String,
-    pub auth_hex: String,
+    pub aes_key_hex: String,
 }
 
 /// POST /account/delete — Permanently delete the user's account and all associated data.
@@ -36,25 +38,43 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<DeleteForm>,
 ) -> Result<Response, Response> {
-    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
+    let uuid = validation::validate_uuid(&form.uuid)?;
+    let supplied_key_hex = validation::validate_aes_key_hex(&form.aes_key_hex)?.to_owned();
     let debug = state.config.debug_mode;
 
+    let user = db::get_user_by_uuid(&state.db, &uuid)
+        .await
+        .map_err(|_e| error_response(500, "db_error", "Database error"))?
+        .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
+
+    let Ok(supplied_key) = hex::decode(&supplied_key_hex) else {
+        return Err(error_response(400, "auth_failed", "AES key does not match"));
+    };
+
+    if !crypto::constant_time_eq_bytes(&user.aes_key, &supplied_key) {
+        let msg = if debug {
+            "AES key does not match".to_string()
+        } else {
+            "Authentication failed".to_string()
+        };
+        return Err(error_response(403, "auth_failed", &msg));
+    }
+
+    let auth = Auth::from_uuid(uuid, supplied_key_hex);
     let _ = state
         .session_manager
         .stop_activity(&auth, state.config.activity_cooldown_secs)
         .await;
 
-    db::delete_user(&state.db, &auth.uuid)
-        .await
-        .map_err(|e| {
-            let msg = if debug {
-                format!("{e}")
-            } else {
-                "Failed to delete account".to_string()
-            };
-            error_response(500, "db_error", &msg)
-        })?;
+    db::delete_user(&state.db, &uuid).await.map_err(|e| {
+        let msg = if debug {
+            format!("{e}")
+        } else {
+            "Failed to delete account".to_string()
+        };
+        error_response(500, "db_error", &msg)
+    })?;
 
-    log::info!("account deleted: {}", auth.uuid);
+    log::info!("account deleted: {uuid}");
     Ok(success_response("success=true".to_string()))
 }

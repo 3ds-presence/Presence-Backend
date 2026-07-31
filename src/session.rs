@@ -418,24 +418,47 @@ impl SessionManager {
         fields: &[&str],
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, u64), SessionError> {
-        let (client, _client_ip, good_counter) = self
-            .authenticate_and_get_client(auth, fields, cooldown_secs)
-            .await?;
-        self.update_session_tick(auth, good_counter).await;
-        Ok((client, good_counter))
-    }
-
-    async fn update_session_tick(&self, auth: &Auth, good_counter: u64) {
+        // Counter check + increment under one lock, or concurrent requests bypass replay protection.
         let mut sessions = self.sessions.lock().await;
-        if let Some(SessionState::Active {
+        let session = sessions
+            .get_mut(&auth.uuid)
+            .ok_or(SessionError::SessionNotFound)?;
+        let (client, aes_key, last_counter, last_activity) = match session {
+            SessionState::Active {
+                client,
+                aes_key,
+                last_counter,
+                last_activity,
+                ..
+            } => (
+                client.clone(),
+                *aes_key,
+                last_counter.load(Ordering::SeqCst),
+                *last_activity,
+            ),
+            SessionState::PendingVerify { .. } => return Err(SessionError::PendingNotActive),
+            SessionState::PendingConsent { .. } => {
+                return Err(SessionError::from("session is pending consent, not active"))
+            }
+        };
+
+        check_cooldown(last_activity, cooldown_secs)?;
+        let good_counter = last_counter + 1;
+        crypto::verify_activity_auth(auth.hex(), good_counter, fields, &aes_key)
+            .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
+
+        // Update the counter and activity timestamp under the same lock.
+        if let SessionState::Active {
             last_counter,
             last_activity,
             ..
-        }) = sessions.get_mut(&auth.uuid)
+        } = session
         {
             last_counter.store(good_counter, Ordering::SeqCst);
             *last_activity = Instant::now();
         }
+        drop(sessions);
+        Ok((client, good_counter))
     }
 
     pub async fn update_activity(

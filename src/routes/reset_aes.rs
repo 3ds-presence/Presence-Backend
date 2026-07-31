@@ -44,8 +44,11 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    let current_hex = hex::encode(&user.aes_key);
-    if current_hex != form.aes_key_hex {
+    let Ok(supplied_key) = hex::decode(&form.aes_key_hex) else {
+        return Err(error_response(400, "auth_failed", "AES key does not match"));
+    };
+
+    if !crypto::constant_time_eq_bytes(&user.aes_key, &supplied_key) {
         return Err(error_response(403, "auth_failed", "AES key does not match"));
     }
 
