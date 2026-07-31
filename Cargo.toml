@@ -22,6 +22,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # Crypto
 aes = "0.9"
+aes-gcm = "0.10"
 cbc = "0.2"
 sha2 = "0.11"
 hex = "0.4"

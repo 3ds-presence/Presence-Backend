@@ -44,7 +44,7 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    let aes_key = extract_aes_key(&user.aes_key)
+    let aes_key = extract_aes_key(&user.aes_key, &state.config.master_key)
         .map_err(|e| error_response(500, "crypto_error", &e))?;
 
     let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
@@ -62,13 +62,15 @@ pub async fn handler(
     Ok(success_response(body))
 }
 
-/// Validate the stored AES key and return a fixed-size array.
-fn extract_aes_key(key_bytes: &[u8]) -> Result<[u8; 32], String> {
-    if key_bytes.len() != 32 {
+/// Decrypt the stored AES key (encrypted at rest) and return a fixed-size array.
+fn extract_aes_key(key_bytes: &[u8], master_key: &[u8; 32]) -> Result<[u8; 32], String> {
+    let decrypted = crate::crypto::decrypt_bytes_at_rest(key_bytes, master_key)
+        .ok_or_else(|| "Failed to decrypt AES key".to_string())?;
+    if decrypted.len() != 32 {
         return Err("Invalid AES key in database".to_string());
     }
     let mut aes_key = [0u8; 32];
-    aes_key.copy_from_slice(key_bytes);
+    aes_key.copy_from_slice(&decrypted);
     Ok(aes_key)
 }
 

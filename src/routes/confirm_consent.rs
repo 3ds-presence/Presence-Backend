@@ -58,6 +58,7 @@ pub async fn handler(
 
     db::create_user(CreateUserParams {
         db: &state.db,
+        master_key: &state.config.master_key,
         uuid: &uuid,
         discord_id: &discord_id,
         aes_key: &aes_key,

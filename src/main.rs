@@ -155,8 +155,9 @@ fn spawn_timeout_task(session_manager: Arc<SessionManager>) {
 fn spawn_token_refresh_task(state: &Arc<AppState>) {
     let refresh_db = state.db.clone();
     let refresh_admin = state.discord_rpc.clone();
+    let master_key = state.config.master_key;
     tokio::spawn(async move {
-        tasks::token_refresh::run(refresh_db, refresh_admin).await;
+        tasks::token_refresh::run_with_master_key(refresh_db, refresh_admin, &master_key).await;
     });
 }
 

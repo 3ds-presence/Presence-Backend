@@ -15,12 +15,15 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
 use rand::RngExt;
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
+type AesKey = [u8; AES_KEY_LEN];
 
 /// Size of our AES-256 key.
 pub const AES_KEY_LEN: usize = 32;
@@ -134,6 +137,77 @@ pub fn constant_time_eq_bytes(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+/// Master-key size for at-rest encryption (AES-256-GCM).
+pub const MASTER_KEY_LEN: usize = 32;
+/// GCM nonce length (96 bits, the recommended size for AES-GCM).
+const GCM_NONCE_LEN: usize = 12;
+/// GCM authentication tag length.
+const GCM_TAG_LEN: usize = 16;
+
+/// Parse a hex-encoded `MASTER_KEY` env value (64 hex chars) into a key array.
+pub fn parse_master_key(hex_str: &str) -> Result<[u8; MASTER_KEY_LEN], String> {
+    let bytes = hex::decode(hex_str).map_err(|e| format!("MASTER_KEY is not valid hex: {e}"))?;
+    if bytes.len() != MASTER_KEY_LEN {
+        return Err(format!(
+            "MASTER_KEY must be {MASTER_KEY_LEN} bytes ({} hex chars), got {} bytes",
+            MASTER_KEY_LEN * 2,
+            bytes.len()
+        ));
+    }
+    let mut key = [0u8; MASTER_KEY_LEN];
+    key.copy_from_slice(&bytes);
+    Ok(key)
+}
+
+/// Encrypt a byte slice with AES-256-GCM using a random 12-byte nonce.
+/// Output format: `nonce (12) || ciphertext || tag (16)`.
+pub fn encrypt_at_rest(data: &[u8], master_key: &AesKey) -> Vec<u8> {
+    let cipher = Aes256Gcm::new_from_slice(master_key).expect("valid AES-256 key length");
+    let nonce_bytes: [u8; GCM_NONCE_LEN] = rand::rng().random();
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), data)
+        .expect("AES-GCM encryption should not fail for in-memory data");
+
+    let mut out = Vec::with_capacity(GCM_NONCE_LEN + ct.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ct);
+    out
+}
+
+/// Decrypt a value produced by [`encrypt_at_rest`]. Returns `None` if the
+/// input is malformed or the authentication tag does not match.
+pub fn decrypt_at_rest(data: &[u8], master_key: &AesKey) -> Option<Vec<u8>> {
+    if data.len() < GCM_NONCE_LEN + GCM_TAG_LEN {
+        return None;
+    }
+    let (nonce_bytes, ct) = data.split_at(GCM_NONCE_LEN);
+    let cipher = Aes256Gcm::new_from_slice(master_key).expect("valid AES-256 key length");
+    cipher
+        .decrypt(Nonce::from_slice(nonce_bytes), ct)
+        .ok()
+}
+
+/// Encrypt a string at rest; returns hex of `nonce || ciphertext || tag`.
+pub fn encrypt_string_at_rest(value: &str, master_key: &AesKey) -> String {
+    hex::encode(encrypt_at_rest(value.as_bytes(), master_key))
+}
+
+/// Decrypt a hex string produced by [`encrypt_string_at_rest`].
+pub fn decrypt_string_at_rest(hex_str: &str, master_key: &AesKey) -> Option<String> {
+    let bytes = hex::decode(hex_str).ok()?;
+    decrypt_at_rest(&bytes, master_key).map(|v| String::from_utf8_lossy(&v).into_owned())
+}
+
+/// Encrypt a raw byte slice (e.g. the 32-byte AES key) at rest.
+pub fn encrypt_bytes_at_rest(value: &[u8], master_key: &AesKey) -> Vec<u8> {
+    encrypt_at_rest(value, master_key)
+}
+
+/// Decrypt a raw byte slice produced by [`encrypt_bytes_at_rest`].
+pub fn decrypt_bytes_at_rest(value: &[u8], master_key: &AesKey) -> Option<Vec<u8>> {
+    decrypt_at_rest(value, master_key)
 }
 
 /// URL-encode matching the 3DS client: unreserved chars kept, space → `+`, rest → `%XX`.

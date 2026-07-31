@@ -21,6 +21,7 @@ use axum::{extract::State, Form};
 use serde::Deserialize;
 
 use crate::auth::Auth;
+use crate::crypto;
 use crate::db;
 use crate::response::{error_response, success_response};
 use crate::session::session_error_into_response;
@@ -52,6 +53,10 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
+    // The access token is stored encrypted at rest — decrypt it before use.
+    let access_token = crypto::decrypt_string_at_rest(&user.access_token, &state.config.master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt access token"))?;
+
     let user_info = mii.map(|mii| {
         let mii_name = mii_utils::get_mii_name(&mii).ok();
         UserInfo {
@@ -65,7 +70,7 @@ pub async fn handler(
         .verify_and_activate(
             &auth,
             state.discord_rpc.rpc(),
-            &user.access_token,
+            &access_token,
             state.config.activity_cooldown_secs,
             user_info,
         )

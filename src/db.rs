@@ -21,10 +21,13 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::models;
+use crate::crypto;
 
 /// Parameters for creating a new user.
 pub struct CreateUserParams<'a> {
     pub db: &'a DatabaseConnection,
+    /// Master key used to encrypt the secrets below at rest (AES-256-GCM).
+    pub master_key: &'a [u8; 32],
     pub uuid: &'a Uuid,
     pub discord_id: &'a str,
     pub aes_key: &'a [u8],
@@ -54,9 +57,9 @@ pub async fn create_user(params: CreateUserParams<'_>) -> Result<(), DbErr> {
     let user = models::ActiveModel {
         uuid: Set(params.uuid.to_string()),
         discord_id: Set(params.discord_id.to_string()),
-        aes_key: Set(params.aes_key.to_vec()),
-        access_token: Set(params.access_token.to_string()),
-        refresh_token: Set(params.refresh_token.to_string()),
+        aes_key: Set(crypto::encrypt_bytes_at_rest(params.aes_key, params.master_key)),
+        access_token: Set(crypto::encrypt_string_at_rest(params.access_token, params.master_key)),
+        refresh_token: Set(crypto::encrypt_string_at_rest(params.refresh_token, params.master_key)),
         token_expires_at: Set(params.token_expires_at),
         created_at: Set(params.created_at),
         last_connected: Set(params.created_at),
@@ -90,6 +93,7 @@ pub async fn get_user_by_uuid(
 /// Update the `OAuth2` tokens for a user.
 pub async fn update_user_tokens(
     db: &DatabaseConnection,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
     uuid: &Uuid,
     access_token: &str,
     refresh_token: &str,
@@ -102,8 +106,8 @@ pub async fn update_user_tokens(
 
     if let Some(user) = user {
         let mut active: models::ActiveModel = user.into();
-        active.access_token = Set(access_token.to_string());
-        active.refresh_token = Set(refresh_token.to_string());
+        active.access_token = Set(crypto::encrypt_string_at_rest(access_token, master_key));
+        active.refresh_token = Set(crypto::encrypt_string_at_rest(refresh_token, master_key));
         active.token_expires_at = Set(token_expires_at);
         active.update(db).await?;
     }
@@ -114,6 +118,7 @@ pub async fn update_user_tokens(
 /// Update the AES-256 key for a user.
 pub async fn update_user_aes_key(
     db: &DatabaseConnection,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
     uuid: &Uuid,
     new_aes_key: &[u8],
 ) -> Result<(), DbErr> {
@@ -124,7 +129,7 @@ pub async fn update_user_aes_key(
 
     if let Some(user) = user {
         let mut active: models::ActiveModel = user.into();
-        active.aes_key = Set(new_aes_key.to_vec());
+        active.aes_key = Set(crypto::encrypt_bytes_at_rest(new_aes_key, master_key));
         active.update(db).await?;
     }
 

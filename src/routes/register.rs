@@ -54,7 +54,7 @@ pub async fn handler(
     let expires_at = now + i64::try_from(token.expires_in).unwrap();
 
     if let Some(existing_user) = lookup_existing_user(&state.db, &discord_id).await? {
-        return handle_returning_user(&state.db, existing_user, &token, expires_at).await;
+        return handle_returning_user(&state, existing_user, &token, expires_at).await;
     }
 
     handle_new_user_requires_consent(&state, &discord_id, &token, expires_at).await
@@ -129,7 +129,7 @@ async fn lookup_existing_user(
 
 /// Step 4a: Returning user — update tokens, preserve UUID and AES key.
 async fn handle_returning_user(
-    db: &sea_orm::DatabaseConnection,
+    state: &AppState,
     existing_user: models::Model,
     token: &CodeExchangeResponse,
     expires_at: i64,
@@ -140,7 +140,8 @@ async fn handle_returning_user(
         .map_err(|_e| error_response(500, "db_error", "Invalid stored UUID"))?;
 
     db::update_user_tokens(
-        db,
+        &state.db,
+        &state.config.master_key,
         &uuid,
         &token.access_token,
         &token.refresh_token,
@@ -150,9 +151,12 @@ async fn handle_returning_user(
     .map_err(|_e| error_response(500, "db_error", "Failed to update user tokens"))?;
 
     let now = crypto::now_secs();
-    let _ = db::update_user_last_connected(db, &uuid, now).await;
+    let _ = db::update_user_last_connected(&state.db, &uuid, now).await;
 
-    let aes_hex = hex::encode(&existing_user.aes_key);
+    // The stored AES key is encrypted at rest — decrypt it for the client.
+    let decrypted = crypto::decrypt_bytes_at_rest(&existing_user.aes_key, &state.config.master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
+    let aes_hex = hex::encode(&decrypted);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
     Ok(success_response(body))
 }

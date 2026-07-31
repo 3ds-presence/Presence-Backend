@@ -26,7 +26,11 @@ use crate::db;
 use crate::models;
 
 /// Refresh Discord `OAuth2` tokens before they expire (runs every hour).
-pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
+pub async fn run_with_master_key(
+    db: DatabaseConnection,
+    admin: DiscordSocialRpcAdmin,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
+) {
     info!("token refresh task started");
 
     loop {
@@ -55,7 +59,7 @@ pub async fn run(db: DatabaseConnection, admin: DiscordSocialRpcAdmin) {
             let admin_clone = admin.clone();
             let sem_clone = semaphore.clone();
 
-            let handle = spawn_user_refresh(sem_clone, db_clone, user, admin_clone);
+            let handle = spawn_user_refresh(sem_clone, db_clone, user, admin_clone, master_key);
             handles.push(handle);
         }
 
@@ -71,10 +75,12 @@ fn spawn_user_refresh(
     db_clone: DatabaseConnection,
     user: models::Model,
     admin_clone: DiscordSocialRpcAdmin,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
 ) -> tokio::task::JoinHandle<()> {
+    let master_key = *master_key;
     tokio::spawn(async move {
         let _permit = sem_clone.acquire_owned().await.unwrap();
-        refresh_user_token(&db_clone, &user, &admin_clone).await;
+        refresh_user_token(&db_clone, &user, &admin_clone, &master_key).await;
     })
 }
 
@@ -83,14 +89,16 @@ async fn refresh_user_token(
     db: &DatabaseConnection,
     user: &models::Model,
     admin: &DiscordSocialRpcAdmin,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
 ) {
     let admin = admin.clone();
-    let refresh_token = user.refresh_token.clone();
+    let refresh_token = crypto::decrypt_string_at_rest(&user.refresh_token, master_key)
+        .unwrap_or_default();
     let result =
         tokio::task::spawn_blocking(move || admin.refresh_user_token(&refresh_token)).await;
 
     match result {
-        Ok(Ok(resp)) => apply_refresh(db, user, &resp).await,
+        Ok(Ok(resp)) => apply_refresh(db, user, &resp, master_key).await,
         Ok(Err(e)) => warn!("token_refresh: error for {}: {}", user.uuid, e),
         Err(e) => warn!("token_refresh: error for {}: {}", user.uuid, e),
     }
@@ -100,6 +108,7 @@ async fn apply_refresh(
     db: &DatabaseConnection,
     user: &models::Model,
     resp: &discord_social_rpc::TokenRefreshResponse,
+    master_key: &[u8; crypto::MASTER_KEY_LEN],
 ) {
     let now = crypto::now_secs();
     let expires_at = now + i64::try_from(resp.expires_in).unwrap();
@@ -113,8 +122,15 @@ async fn apply_refresh(
         return;
     };
 
-    if let Err(e) =
-        db::update_user_tokens(db, &uuid, &resp.access_token, &new_refresh, expires_at).await
+    if let Err(e) = db::update_user_tokens(
+        db,
+        master_key,
+        &uuid,
+        &resp.access_token,
+        &new_refresh,
+        expires_at,
+    )
+    .await
     {
         warn!(
             "token_refresh: failed to update tokens for {}: {}",

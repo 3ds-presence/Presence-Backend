@@ -44,17 +44,21 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
+    // The stored AES key is encrypted at rest — decrypt before comparing.
+    let stored_key = crypto::decrypt_bytes_at_rest(&user.aes_key, &state.config.master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
+
     let Ok(supplied_key) = hex::decode(&form.aes_key_hex) else {
         return Err(error_response(400, "auth_failed", "AES key does not match"));
     };
 
-    if !crypto::constant_time_eq_bytes(&user.aes_key, &supplied_key) {
+    if !crypto::constant_time_eq_bytes(&stored_key, &supplied_key) {
         return Err(error_response(403, "auth_failed", "AES key does not match"));
     }
 
     let new_key = crypto::generate_aes_key();
 
-    db::update_user_aes_key(&state.db, &uuid, &new_key)
+    db::update_user_aes_key(&state.db, &state.config.master_key, &uuid, &new_key)
         .await
         .map_err(|_e| error_response(500, "db_error", "Failed to update AES key"))?;
 

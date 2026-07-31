@@ -16,9 +16,13 @@
 
 use std::env;
 
+use crate::crypto;
+
 /// Server configuration loaded from environment variables / .env file.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Master key (AES-256) used to encrypt secrets at rest in the database.
+    pub master_key: [u8; crypto::MASTER_KEY_LEN],
     /// Discord application ID (same as `OAuth2` client ID).
     pub client_id: String,
     /// Discord `OAuth2` client secret.
@@ -51,7 +55,13 @@ impl Config {
     /// Load configuration from environment variables.
     /// Call this after `dotenvy::dotenv()`.
     pub fn from_env() -> Self {
+        let master_key_hex =
+            env::var("MASTER_KEY").expect("MASTER_KEY must be set in .env (64 hex chars)");
+        let master_key = crypto::parse_master_key(&master_key_hex)
+            .expect("MASTER_KEY must be a valid 64-char hex string");
+
         Self {
+            master_key,
             client_id: env::var("CLIENT_ID").expect("CLIENT_ID must be set in .env"),
             client_secret: env::var("CLIENT_SECRET").expect("CLIENT_SECRET must be set in .env"),
             redirect_uri: env::var("REDIRECT_URI").expect("REDIRECT_URI must be set in .env"),
