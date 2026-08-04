@@ -175,19 +175,22 @@ fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        
         .route("/register", post(routes::register::handler))
         .route("/confirm-consent", post(routes::confirm_consent::handler))
-        .route("/login", post(routes::login::handler))
-        .route("/login/verify", post(routes::login_verify::handler))
-        .route("/activity/set", post(routes::activity::set_handler))
-        .route(
-            "/activity/heartbeat",
-            post(routes::activity::heartbeat_handler),
-        )
-        .route("/logout", post(routes::logout::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))
         .route("/account/delete", post(routes::delete_account::handler))
         .route("/account/export", post(routes::export_data::handler))
+        
+        .route("/3ds/login", post(routes::login::handler))
+        .route("/3ds/login/verify", post(routes::login_verify::handler))
+        .route("/3ds/activity/set", post(routes::activity::set_handler))
+        .route(
+            "/3ds/activity/heartbeat",
+            post(routes::activity::heartbeat_handler),
+        )
+        .route("/3ds/logout", post(routes::logout::handler))
+        
         .with_state(state)
 }
 
