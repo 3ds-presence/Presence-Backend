@@ -693,9 +693,7 @@ fn make_session_error_response(err: &SessionError) -> Response {
             "Discord OAuth2 token revoked. Please re-login.",
         ),
         // Never leak padding/integrity details (padding oracle).
-        SessionError::AuthFailed(_) => {
-            error_response(403, "auth_failed", "Authentication failed")
-        }
+        SessionError::AuthFailed(_) => error_response(403, "auth_failed", "Authentication failed"),
         SessionError::ReplayDetected { .. } => {
             error_response(403, "replay_detected", "Replay detected")
         }

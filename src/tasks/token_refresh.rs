@@ -92,8 +92,8 @@ async fn refresh_user_token(
     master_key: &[u8; crypto::MASTER_KEY_LEN],
 ) {
     let admin = admin.clone();
-    let refresh_token = crypto::decrypt_string_at_rest(&user.refresh_token, master_key)
-        .unwrap_or_default();
+    let refresh_token =
+        crypto::decrypt_string_at_rest(&user.refresh_token, master_key).unwrap_or_default();
     let result =
         tokio::task::spawn_blocking(move || admin.refresh_user_token(&refresh_token)).await;
 
@@ -109,7 +109,11 @@ async fn refresh_user_token(
 /// Discord returns `invalid_grant` when the refresh token has been revoked
 /// (or is invalid/expired). Such a token can never be refreshed again, so the
 /// account is deleted rather than retried every hour forever.
-async fn handle_refresh_error(db: &DatabaseConnection, user: &models::Model, e: discord_social_rpc::Error) {
+async fn handle_refresh_error(
+    db: &DatabaseConnection,
+    user: &models::Model,
+    e: discord_social_rpc::Error,
+) {
     let msg = e.to_string();
     if is_invalid_grant(&msg) {
         warn!(

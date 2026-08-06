@@ -41,10 +41,7 @@ impl Auth {
         let uuid = validation::validate_uuid(uuid_str)?;
         let hex = validation::validate_auth_hex(hex)?.to_string();
 
-        Ok(Self {
-            uuid,
-            hex,
-        })
+        Ok(Self { uuid, hex })
     }
 
     /// Convenience: borrow the hex string.

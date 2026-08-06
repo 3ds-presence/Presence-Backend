@@ -36,9 +36,8 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ConsentForm>,
 ) -> Result<Response, Response> {
-    let temp_token = Uuid::parse_str(&form.temp_token).map_err(|_| {
-        error_response(400, "invalid_temp_token", "Invalid temp_token format")
-    })?;
+    let temp_token = Uuid::parse_str(&form.temp_token)
+        .map_err(|_| error_response(400, "invalid_temp_token", "Invalid temp_token format"))?;
 
     let (discord_id, access_token, refresh_token, expires_at) = state
         .session_manager

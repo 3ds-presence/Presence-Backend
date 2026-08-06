@@ -20,8 +20,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::models;
 use crate::crypto;
+use crate::models;
 
 /// Parameters for creating a new user.
 pub struct CreateUserParams<'a> {
@@ -57,9 +57,18 @@ pub async fn create_user(params: CreateUserParams<'_>) -> Result<(), DbErr> {
     let user = models::ActiveModel {
         uuid: Set(params.uuid.to_string()),
         discord_id: Set(params.discord_id.to_string()),
-        aes_key: Set(crypto::encrypt_bytes_at_rest(params.aes_key, params.master_key)),
-        access_token: Set(crypto::encrypt_string_at_rest(params.access_token, params.master_key)),
-        refresh_token: Set(crypto::encrypt_string_at_rest(params.refresh_token, params.master_key)),
+        aes_key: Set(crypto::encrypt_bytes_at_rest(
+            params.aes_key,
+            params.master_key,
+        )),
+        access_token: Set(crypto::encrypt_string_at_rest(
+            params.access_token,
+            params.master_key,
+        )),
+        refresh_token: Set(crypto::encrypt_string_at_rest(
+            params.refresh_token,
+            params.master_key,
+        )),
         token_expires_at: Set(params.token_expires_at),
         created_at: Set(params.created_at),
         last_connected: Set(params.created_at),

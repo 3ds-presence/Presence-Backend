@@ -54,9 +54,7 @@ fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result
         return Err(AppError(Box::new(error_response(
             400,
             &format!("invalid_{field_name}"),
-            &format!(
-                "{field_name} must be exactly {expected_len} hex characters"
-            ),
+            &format!("{field_name} must be exactly {expected_len} hex characters"),
         ))));
     }
     if !value.chars().all(|c| c.is_ascii_hexdigit()) {

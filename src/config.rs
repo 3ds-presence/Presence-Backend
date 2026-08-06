@@ -81,10 +81,11 @@ impl Config {
             scripts_dir: env::var("SCRIPTS_DIR").unwrap_or_else(|_| "/app/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
-            debug_mode: env::var("RUST_LOG")
-                .is_ok_and(|v| v.to_lowercase().contains("debug")),
+            debug_mode: env::var("RUST_LOG").is_ok_and(|v| v.to_lowercase().contains("debug")),
             cache_capacity: env::var("CACHE_CAPACITY").ok().and_then(|s| s.parse().ok()),
-            cache_evict_batch: env::var("CACHE_EVICT_BATCH").ok().and_then(|s| s.parse().ok()),
+            cache_evict_batch: env::var("CACHE_EVICT_BATCH")
+                .ok()
+                .and_then(|s| s.parse().ok()),
         }
     }
 }

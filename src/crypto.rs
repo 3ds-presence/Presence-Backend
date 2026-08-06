@@ -184,9 +184,7 @@ pub fn decrypt_at_rest(data: &[u8], master_key: &AesKey) -> Option<Vec<u8>> {
     }
     let (nonce_bytes, ct) = data.split_at(GCM_NONCE_LEN);
     let cipher = Aes256Gcm::new_from_slice(master_key).expect("valid AES-256 key length");
-    cipher
-        .decrypt(Nonce::from_slice(nonce_bytes), ct)
-        .ok()
+    cipher.decrypt(Nonce::from_slice(nonce_bytes), ct).ok()
 }
 
 /// Encrypt a string at rest; returns hex of `nonce || ciphertext || tag`.
