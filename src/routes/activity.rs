@@ -42,15 +42,13 @@ pub async fn set_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<Response, Response> {
-    let uuid = validation::validate_uuid(&form.uuid)?;
-    let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
+    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
     let titleid = validation::validate_titleid(form.titleid)?;
     let name = validation::validate_name(form.name)?;
     let publisher = validation::validate_publisher(form.publisher)?;
     let extra = validation::validate_extra(form.extra)?;
 
-    let auth = Auth::from_uuid(uuid, auth_hex.to_string());
     let game_info = generate_game_info(titleid, name, publisher, extra.as_ref())?;
 
     state
@@ -74,27 +72,9 @@ fn generate_game_info(
     extra: Option<&String>,
 ) -> Result<Option<GameInfo>, AppError> {
     if titleid.is_some() || name.is_some() || publisher.is_some() || extra.is_some() {
-        let titleid_val = titleid.ok_or_else(|| {
-            AppError(Box::new(error_response(
-                400,
-                "incomplete_fields",
-                "titleid, name and publisher must all be provided together",
-            )))
-        })?;
-        let name_val = name.ok_or_else(|| {
-            AppError(Box::new(error_response(
-                400,
-                "incomplete_fields",
-                "titleid, name and publisher must all be provided together",
-            )))
-        })?;
-        let publisher_val = publisher.ok_or_else(|| {
-            AppError(Box::new(error_response(
-                400,
-                "incomplete_fields",
-                "titleid, name and publisher must all be provided together",
-            )))
-        })?;
+        let titleid_val = titleid.ok_or_else(|| incomplete_fields_error())?;
+        let name_val = name.ok_or_else(|| incomplete_fields_error())?;
+        let publisher_val = publisher.ok_or_else(|| incomplete_fields_error())?;
         Ok(Some(GameInfo {
             title_id: titleid_val,
             name: name_val,
@@ -105,15 +85,21 @@ fn generate_game_info(
     }
 }
 
+/// Build the shared "incomplete fields" error.
+fn incomplete_fields_error() -> AppError {
+    AppError(Box::new(error_response(
+        400,
+        "incomplete_fields",
+        "titleid, name and publisher must all be provided together",
+    )))
+}
+
 /// POST /activity/heartbeat — Keep session alive without changing activity.
 pub async fn heartbeat_handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<ActivityForm>,
 ) -> Result<Response, Response> {
-    let uuid = validation::validate_uuid(&form.uuid)?;
-    let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
-
-    let auth = Auth::from_uuid(uuid, auth_hex.to_string());
+    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
     state
         .session_manager

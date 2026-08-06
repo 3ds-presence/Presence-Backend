@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod activity;
+pub mod common;
 pub mod confirm_consent;
 pub mod delete_account;
 pub mod export_data;

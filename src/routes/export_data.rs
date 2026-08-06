@@ -22,10 +22,9 @@ use axum::response::Response;
 use axum::Form;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto;
-use crate::db;
 use crate::models;
 use crate::response::{error_response, AppError};
+use crate::routes::common::authenticate_aes_key;
 use crate::validation;
 use crate::AppState;
 
@@ -52,28 +51,14 @@ pub async fn handler(
     let supplied_key_hex = validation::validate_aes_key_hex(&form.aes_key_hex)?.to_owned();
     let debug = state.config.debug_mode;
 
-    let user = db::get_user_by_uuid(&state.db, &uuid)
-        .await
-        .map_err(|_e| error_response(500, "db_error", "Database error"))?
-        .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
-
-    // The stored AES key is encrypted at rest — decrypt before comparing.
-    let stored_key = crypto::decrypt_bytes_at_rest(&user.aes_key, &state.config.master_key)
-        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
-
-    let fail_msg = if debug {
-        "AES key does not match".to_string()
-    } else {
-        "Authentication failed".to_string()
-    };
-
-    let Ok(supplied_key) = hex::decode(&supplied_key_hex) else {
-        return Err(error_response(400, "auth_failed", &fail_msg));
-    };
-
-    if !crypto::constant_time_eq_bytes(&stored_key, &supplied_key) {
-        return Err(error_response(403, "auth_failed", &fail_msg));
-    }
+    let user = authenticate_aes_key(
+        &state.db,
+        &state.config.master_key,
+        &uuid,
+        &supplied_key_hex,
+        debug,
+    )
+    .await?;
 
     let json = build_export_json(&user, debug)?;
     Ok(build_json_response(&json))

@@ -132,7 +132,7 @@ impl std::error::Error for SessionError {}
 
 impl IntoResponse for SessionError {
     fn into_response(self) -> Response {
-        make_session_error_response(&self)
+        session_error_to_response(self, false)
     }
 }
 
@@ -564,6 +564,16 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Stop and remove a session without auth — used by background tasks
+    /// (timeout/cleanup) that already hold a UUID.
+    pub async fn terminate_session(&self, uuid: &Uuid) {
+        let state = self.remove_session(uuid).await;
+        if let Some(SessionState::Active { client, .. }) = state {
+            stop_discord_client(client).await;
+        }
+        log::info!("session {uuid}: terminated");
+    }
+
     pub async fn get_expired_active_sessions(&self, timeout_secs: u64) -> Vec<Uuid> {
         let sessions = self.sessions.lock().await;
         sessions
@@ -602,11 +612,7 @@ impl SessionManager {
     /// Remove a session whose Discord connection died (token revoked, gateway
     /// closed unexpectedly). Stops the client and decrements the IP counter.
     async fn remove_dead_session(&self, uuid: &Uuid) {
-        let state = self.remove_session(uuid).await;
-        if let Some(SessionState::Active { client, .. }) = state {
-            let _ = tokio::task::spawn_blocking(move || client.stop_activity()).await;
-        }
-        log::info!("session {uuid}: removed (Discord connection died)");
+        self.terminate_session(uuid).await;
     }
 }
 
@@ -673,38 +679,13 @@ async fn stop_discord_client(client: Arc<DiscordRpcClient>) {
     .await;
 }
 
-/// Build a safe (default) session error response.
+/// Build a safe session error response.
 ///
 /// Message details that could be used as a security oracle (e.g. AES-CBC
 /// padding / integrity errors, internal error strings) are never exposed
-/// here. Routes that want verbose messages must call
-/// [`session_error_into_response`] with `debug_mode` — and even then only
-/// non-sensitive error kinds are detailed (see [`session_error_into_response`]).
-fn make_session_error_response(err: &SessionError) -> Response {
-    match err {
-        SessionError::SessionNotFound | SessionError::PendingNotActive => error_response(
-            401,
-            "session_expired",
-            "Session expired or not found. Please re-login.",
-        ),
-        SessionError::TokenRevoked => error_response(
-            401,
-            "token_revoked",
-            "Discord OAuth2 token revoked. Please re-login.",
-        ),
-        // Never leak padding/integrity details (padding oracle).
-        SessionError::AuthFailed(_) => error_response(403, "auth_failed", "Authentication failed"),
-        SessionError::ReplayDetected { .. } => {
-            error_response(403, "replay_detected", "Replay detected")
-        }
-        SessionError::Cooldown { remaining } => {
-            error_response(429, "cooldown", &format!("Wait {remaining} seconds"))
-        }
-        SessionError::Other(_) => error_response(400, "error", "Request failed"),
-    }
-}
-
-pub fn session_error_into_response(err: SessionError, debug_mode: bool) -> Response {
+/// unless `debug_mode` is on, and even then only non-sensitive error kinds
+/// are detailed.
+fn session_error_to_response(err: SessionError, debug_mode: bool) -> Response {
     match err {
         SessionError::SessionNotFound | SessionError::PendingNotActive => error_response(
             401,
@@ -744,4 +725,10 @@ pub fn session_error_into_response(err: SessionError, debug_mode: bool) -> Respo
             error_response(400, "error", &msg)
         }
     }
+}
+
+/// Public wrapper used by routes to convert a `SessionError` into a response,
+/// with optional verbose messages in debug mode.
+pub fn session_error_into_response(err: SessionError, debug_mode: bool) -> Response {
+    session_error_to_response(err, debug_mode)
 }

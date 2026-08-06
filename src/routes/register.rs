@@ -154,9 +154,9 @@ async fn handle_returning_user(
     let _ = db::update_user_last_connected(&state.db, &uuid, now).await;
 
     // The stored AES key is encrypted at rest — decrypt it for the client.
-    let decrypted = crypto::decrypt_bytes_at_rest(&existing_user.aes_key, &state.config.master_key)
+    let decrypted = crypto::decrypt_aes_key_at_rest(&existing_user.aes_key, &state.config.master_key)
         .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
-    let aes_hex = hex::encode(&decrypted);
+    let aes_hex = hex::encode(decrypted);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
     Ok(success_response(body))
 }

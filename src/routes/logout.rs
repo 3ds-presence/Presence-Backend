@@ -22,7 +22,6 @@ use serde::Deserialize;
 use crate::auth::Auth;
 use crate::response::success_response;
 use crate::session::session_error_into_response;
-use crate::validation;
 use crate::AppState;
 
 #[derive(Deserialize, Debug, Default)]
@@ -36,10 +35,7 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
     Form(form): Form<LogoutForm>,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let uuid = validation::validate_uuid(&form.uuid)?;
-    let auth_hex = validation::validate_auth_hex(&form.auth_hex)?;
-
-    let auth = Auth::from_uuid(uuid, auth_hex.to_string());
+    let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
     state
         .session_manager

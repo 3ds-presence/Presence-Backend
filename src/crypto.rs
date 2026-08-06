@@ -203,9 +203,16 @@ pub fn encrypt_bytes_at_rest(value: &[u8], master_key: &AesKey) -> Vec<u8> {
     encrypt_at_rest(value, master_key)
 }
 
-/// Decrypt a raw byte slice produced by [`encrypt_bytes_at_rest`].
-pub fn decrypt_bytes_at_rest(value: &[u8], master_key: &AesKey) -> Option<Vec<u8>> {
-    decrypt_at_rest(value, master_key)
+/// Decrypt a stored AES key (encrypted at rest) into a fixed-size array.
+/// Returns `None` if the stored data is malformed or not exactly [`AES_KEY_LEN`] bytes.
+pub fn decrypt_aes_key_at_rest(value: &[u8], master_key: &AesKey) -> Option<[u8; AES_KEY_LEN]> {
+    let decrypted = decrypt_at_rest(value, master_key)?;
+    if decrypted.len() != AES_KEY_LEN {
+        return None;
+    }
+    let mut key = [0u8; AES_KEY_LEN];
+    key.copy_from_slice(&decrypted);
+    Some(key)
 }
 
 /// URL-encode matching the 3DS client: unreserved chars kept, space → `+`, rest → `%XX`.

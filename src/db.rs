@@ -99,6 +99,18 @@ pub async fn get_user_by_uuid(
         .await
 }
 
+/// Fetch a user by UUID as an `ActiveModel`, or return `Ok(None)` if absent.
+async fn get_user_active_model(
+    db: &DatabaseConnection,
+    uuid: &Uuid,
+) -> Result<Option<models::ActiveModel>, DbErr> {
+    let user = models::Entity::find()
+        .filter(models::Column::Uuid.eq(uuid.to_string()))
+        .one(db)
+        .await?;
+    Ok(user.map(Into::into))
+}
+
 /// Update the `OAuth2` tokens for a user.
 pub async fn update_user_tokens(
     db: &DatabaseConnection,
@@ -108,19 +120,12 @@ pub async fn update_user_tokens(
     refresh_token: &str,
     token_expires_at: i64,
 ) -> Result<(), DbErr> {
-    let user: Option<models::Model> = models::Entity::find()
-        .filter(models::Column::Uuid.eq(uuid.to_string()))
-        .one(db)
-        .await?;
-
-    if let Some(user) = user {
-        let mut active: models::ActiveModel = user.into();
+    if let Some(mut active) = get_user_active_model(db, uuid).await? {
         active.access_token = Set(crypto::encrypt_string_at_rest(access_token, master_key));
         active.refresh_token = Set(crypto::encrypt_string_at_rest(refresh_token, master_key));
         active.token_expires_at = Set(token_expires_at);
         active.update(db).await?;
     }
-
     Ok(())
 }
 
@@ -131,17 +136,10 @@ pub async fn update_user_aes_key(
     uuid: &Uuid,
     new_aes_key: &[u8],
 ) -> Result<(), DbErr> {
-    let user: Option<models::Model> = models::Entity::find()
-        .filter(models::Column::Uuid.eq(uuid.to_string()))
-        .one(db)
-        .await?;
-
-    if let Some(user) = user {
-        let mut active: models::ActiveModel = user.into();
+    if let Some(mut active) = get_user_active_model(db, uuid).await? {
         active.aes_key = Set(crypto::encrypt_bytes_at_rest(new_aes_key, master_key));
         active.update(db).await?;
     }
-
     Ok(())
 }
 
@@ -174,17 +172,10 @@ pub async fn update_user_last_connected(
     uuid: &Uuid,
     now: i64,
 ) -> Result<(), DbErr> {
-    let user: Option<models::Model> = models::Entity::find()
-        .filter(models::Column::Uuid.eq(uuid.to_string()))
-        .one(db)
-        .await?;
-
-    if let Some(user) = user {
-        let mut active: models::ActiveModel = user.into();
+    if let Some(mut active) = get_user_active_model(db, uuid).await? {
         active.last_connected = Set(now);
         active.update(db).await?;
     }
-
     Ok(())
 }
 

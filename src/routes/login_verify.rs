@@ -22,8 +22,8 @@ use serde::Deserialize;
 
 use crate::auth::Auth;
 use crate::crypto;
-use crate::db;
 use crate::response::{error_response, success_response};
+use crate::routes::common::fetch_user_or_404;
 use crate::session::session_error_into_response;
 use crate::utils::mii_utils;
 use crate::validation;
@@ -48,10 +48,7 @@ pub async fn handler(
 
     let auth = Auth::from_uuid(uuid, cipher_hex.to_string());
 
-    let user = db::get_user_by_uuid(&state.db, &auth.uuid)
-        .await
-        .map_err(|_e| error_response(500, "db_error", "Database error"))?
-        .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
+    let user = fetch_user_or_404(&state.db, &auth.uuid).await?;
 
     // The access token is stored encrypted at rest — decrypt it before use.
     let access_token = crypto::decrypt_string_at_rest(&user.access_token, &state.config.master_key)

@@ -48,26 +48,51 @@ pub const MII_MAX_LEN: usize = 192;
 /// Max length of a Discord `OAuth2` code.
 pub const CODE_MAX_LEN: usize = 128;
 
-/// Check a hex string is exactly `expected_len` chars and valid hex.
-fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result<(), AppError> {
-    if value.len() != expected_len {
-        return Err(AppError(Box::new(error_response(
-            400,
-            &format!("invalid_{field_name}"),
-            &format!("{field_name} must be exactly {expected_len} hex characters"),
-        ))));
-    }
+/// Build an "invalid field" error with a given message for a given field.
+fn field_error(field_name: &str, message: &str) -> AppError {
+    AppError(Box::new(error_response(
+        400,
+        &format!("invalid_{field_name}"),
+        message,
+    )))
+}
+
+/// Build a "too long" error for a field.
+fn too_long_error(field_name: &str, max_len: usize) -> AppError {
+    field_error(
+        field_name,
+        &format!("{field_name} too long (max {max_len} characters)"),
+    )
+}
+
+/// Build a "not hex" error for a field.
+fn not_hex_error(field_name: &str) -> AppError {
+    field_error(
+        field_name,
+        &format!("{field_name} must contain only hex characters"),
+    )
+}
+
+/// Check that every char is a hex digit.
+fn check_hex_chars(value: &str, field_name: &str) -> Result<(), AppError> {
     if !value.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(AppError(Box::new(error_response(
-            400,
-            &format!("invalid_{field_name}"),
-            &format!("{field_name} must contain only hex characters"),
-        ))));
+        return Err(not_hex_error(field_name));
     }
     Ok(())
 }
 
-/// Check that a string is not empty and does not exceed `max_len`.
+/// Check a hex string is exactly `expected_len` chars and valid hex.
+fn check_hex_exact(value: &str, expected_len: usize, field_name: &str) -> Result<(), AppError> {
+    if value.len() != expected_len {
+        return Err(field_error(
+            field_name,
+            &format!("{field_name} must be exactly {expected_len} hex characters"),
+        ));
+    }
+    check_hex_chars(value, field_name)
+}
+
+/// Check that a non-empty string does not exceed `max_len`.
 fn check_max_len(value: &str, max_len: usize, field_name: &str) -> Result<(), AppError> {
     if value.is_empty() {
         return Err(AppError(Box::new(error_response(
@@ -77,11 +102,7 @@ fn check_max_len(value: &str, max_len: usize, field_name: &str) -> Result<(), Ap
         ))));
     }
     if value.len() > max_len {
-        return Err(AppError(Box::new(error_response(
-            400,
-            &format!("invalid_{field_name}"),
-            &format!("{field_name} too long (max {max_len} characters)"),
-        ))));
+        return Err(too_long_error(field_name, max_len));
     }
     Ok(())
 }
@@ -147,11 +168,7 @@ pub fn validate_publisher(publisher: Option<String>) -> Result<Option<String>, A
 pub fn validate_extra(extra: Option<String>) -> Result<Option<String>, AppError> {
     if let Some(ref e) = extra {
         if e.len() > EXTRA_MAX_LEN {
-            return Err(AppError(Box::new(error_response(
-                400,
-                "invalid_extra",
-                &format!("extra too long (max {EXTRA_MAX_LEN} characters)"),
-            ))));
+            return Err(too_long_error("extra", EXTRA_MAX_LEN));
         }
     }
     Ok(extra)
@@ -163,19 +180,9 @@ pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
     let mii = mii.filter(|m| !m.is_empty());
     if let Some(ref m) = mii {
         if m.len() > MII_MAX_LEN {
-            return Err(AppError(Box::new(error_response(
-                400,
-                "invalid_mii",
-                &format!("mii too long (max {MII_MAX_LEN} characters)"),
-            ))));
+            return Err(too_long_error("mii", MII_MAX_LEN));
         }
-        if !m.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(AppError(Box::new(error_response(
-                400,
-                "invalid_mii",
-                "mii must contain only hex characters",
-            ))));
-        }
+        check_hex_chars(m, "mii")?;
     }
     Ok(mii)
 }

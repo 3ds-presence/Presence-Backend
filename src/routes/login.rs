@@ -21,6 +21,7 @@ use axum::{extract::State, http::HeaderMap, Form};
 use log::info;
 use serde::Deserialize;
 
+use crate::crypto;
 use crate::db;
 use crate::response::{error_response, success_response};
 use crate::validation;
@@ -44,8 +45,8 @@ pub async fn handler(
         .map_err(|_e| error_response(500, "db_error", "Database error"))?
         .ok_or_else(|| error_response(404, "user_not_found", "User not found"))?;
 
-    let aes_key = extract_aes_key(&user.aes_key, &state.config.master_key)
-        .map_err(|e| error_response(500, "crypto_error", &e))?;
+    let aes_key = crypto::decrypt_aes_key_at_rest(&user.aes_key, &state.config.master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
 
     let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
 
@@ -60,18 +61,6 @@ pub async fn handler(
     let body = format!("nonce={nonce}");
 
     Ok(success_response(body))
-}
-
-/// Decrypt the stored AES key (encrypted at rest) and return a fixed-size array.
-fn extract_aes_key(key_bytes: &[u8], master_key: &[u8; 32]) -> Result<[u8; 32], String> {
-    let decrypted = crate::crypto::decrypt_bytes_at_rest(key_bytes, master_key)
-        .ok_or_else(|| "Failed to decrypt AES key".to_string())?;
-    if decrypted.len() != 32 {
-        return Err("Invalid AES key in database".to_string());
-    }
-    let mut aes_key = [0u8; 32];
-    aes_key.copy_from_slice(&decrypted);
-    Ok(aes_key)
 }
 
 /// Extract client IP from reverse proxy headers (X-Real-IP, then X-Forwarded-For).
