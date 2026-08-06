@@ -72,9 +72,9 @@ fn generate_game_info(
     extra: Option<&String>,
 ) -> Result<Option<GameInfo>, AppError> {
     if titleid.is_some() || name.is_some() || publisher.is_some() || extra.is_some() {
-        let titleid_val = titleid.ok_or_else(|| incomplete_fields_error())?;
-        let name_val = name.ok_or_else(|| incomplete_fields_error())?;
-        let publisher_val = publisher.ok_or_else(|| incomplete_fields_error())?;
+        let titleid_val = titleid.ok_or_else(incomplete_fields_error)?;
+        let name_val = name.ok_or_else(incomplete_fields_error)?;
+        let publisher_val = publisher.ok_or_else(incomplete_fields_error)?;
         Ok(Some(GameInfo {
             title_id: titleid_val,
             name: name_val,
