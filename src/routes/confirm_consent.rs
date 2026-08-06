@@ -56,6 +56,7 @@ pub async fn handler(
     let uuid = Uuid::new_v4();
     let aes_key = crypto::generate_aes_key();
 
+    let debug = state.config.debug_mode;
     db::create_user(CreateUserParams {
         db: &state.db,
         master_key: &state.config.master_key,
@@ -68,7 +69,14 @@ pub async fn handler(
         created_at: now,
     })
     .await
-    .map_err(|e| error_response(500, "db_error", &format!("Failed to create user: {e}")))?;
+    .map_err(|e| {
+        let msg = if debug {
+            format!("Failed to create user: {e}")
+        } else {
+            "Failed to create user".to_string()
+        };
+        error_response(500, "db_error", &msg)
+    })?;
 
     let aes_hex = hex::encode(aes_key);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");

@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use activity_generator::info::GameInfo;
 use axum::response::{IntoResponse, Response};
-use discord_social_rpc::{Activity, DiscordRpcClient, DiscordSocialRpc};
+use discord_social_rpc::{Activity, ActivityStatus, DiscordRpcClient, DiscordSocialRpc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -72,7 +72,11 @@ impl std::fmt::Debug for SessionState {
                 .debug_struct("PendingVerify")
                 .field("nonce", nonce)
                 .finish(),
-            Self::PendingConsent { temp_token, created_at, .. } => f
+            Self::PendingConsent {
+                temp_token,
+                created_at,
+                ..
+            } => f
                 .debug_struct("PendingConsent")
                 .field("temp_token", temp_token)
                 .field("created_at", created_at)
@@ -96,8 +100,15 @@ pub enum SessionError {
     SessionNotFound,
     PendingNotActive,
     AuthFailed(String),
-    ReplayDetected { counter: u64, last: u64 },
-    Cooldown { remaining: u64 },
+    ReplayDetected {
+        counter: u64,
+        last: u64,
+    },
+    Cooldown {
+        remaining: u64,
+    },
+    /// The Discord `OAuth2` token was revoked or rejected by Discord.
+    TokenRevoked,
     Other(String),
 }
 
@@ -111,6 +122,7 @@ impl std::fmt::Display for SessionError {
                 write!(f, "replay detected: counter {counter} <= last {last}")
             }
             Self::Cooldown { remaining } => write!(f, "cooldown: wait {remaining} seconds"),
+            Self::TokenRevoked => write!(f, "Discord OAuth2 token revoked"),
             Self::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -175,7 +187,7 @@ impl SessionManager {
     }
 
     /// Remove a session by UUID, decrement IP counter, and return its state.
-    async fn remove_session_with_ip(&self, uuid: &Uuid) -> Option<SessionState> {
+    pub async fn remove_session(&self, uuid: &Uuid) -> Option<SessionState> {
         let state = self.sessions.lock().await.remove(uuid);
         if let Some(ref s) = state {
             self.remove_consent_mapping(s).await;
@@ -308,7 +320,7 @@ impl SessionManager {
         auth: &Auth,
     ) -> Result<(u64, [u8; 32], IpAddr), SessionError> {
         let state = self
-            .remove_session_with_ip(&auth.uuid)
+            .remove_session(&auth.uuid)
             .await
             .ok_or_else(|| SessionError::from("no pending session for this uuid"))?;
         match state {
@@ -333,18 +345,19 @@ impl SessionManager {
             .map_err(|e| SessionError::from(format!("failed to create Discord client: {e}")))?;
         let client = Arc::new(client);
         let client_clone = client.clone();
-        tokio::task::spawn_blocking(move || {
-            let _ = client_clone.start_activity();
-        })
-        .await
-        .map_err(|e| SessionError::from(format!("spawn_blocking failed: {e}")))?;
+        // Propagate the gateway result: a revoked/rejected token must surface
+        // to the client instead of being silently ignored.
+        tokio::task::spawn_blocking(move || client_clone.start_activity())
+            .await
+            .map_err(|e| SessionError::from(format!("spawn_blocking failed: {e}")))?
+            .map_err(|e| match e {
+                discord_social_rpc::Error::InvalidToken(_) => SessionError::TokenRevoked,
+                other => SessionError::from(format!("failed to start Discord client: {other}")),
+            })?;
         Ok(client)
     }
 
-    async fn promote_to_active(
-        &self,
-        params: PromoteToActiveParams<'_>,
-    ) {
+    async fn promote_to_active(&self, params: PromoteToActiveParams<'_>) {
         let last_activity = Instant::now()
             .checked_sub(Duration::from_secs(params.cooldown_secs + 1))
             .unwrap();
@@ -473,6 +486,10 @@ impl SessionManager {
         let (client, _good_counter) = self
             .authenticate_and_tick(auth, &fields, state.config.activity_cooldown_secs)
             .await?;
+        if let Err(e) = ensure_client_alive(&client) {
+            self.remove_dead_session(&auth.uuid).await;
+            return Err(e);
+        }
         let user_info = self.fetch_user_info(auth).await;
 
         let activity = if let Some(game_info) = &game_info {
@@ -514,19 +531,25 @@ impl SessionManager {
         client: Arc<DiscordRpcClient>,
         activity: discord_social_rpc::Activity,
     ) -> Result<(), SessionError> {
-        tokio::task::spawn_blocking(move || {
-            let _ = client.set_activity(&activity);
-        })
-        .await
-        .map_err(|e| SessionError::from(format!("set_activity spawn failed: {e}")))?;
+        tokio::task::spawn_blocking(move || client.set_activity(&activity))
+            .await
+            .map_err(|e| SessionError::from(format!("set_activity spawn failed: {e}")))?
+            .map_err(|e| match e {
+                discord_social_rpc::Error::InvalidToken(_) => SessionError::TokenRevoked,
+                other => SessionError::from(format!("set_activity failed: {other}")),
+            })?;
         Ok(())
     }
 
     pub async fn heartbeat(&self, auth: &Auth, cooldown_secs: u64) -> Result<(), SessionError> {
         let fields: [&str; 0] = [];
-        let (_client, _good_counter) = self
+        let (client, _good_counter) = self
             .authenticate_and_tick(auth, &fields, cooldown_secs)
             .await?;
+        if let Err(e) = ensure_client_alive(&client) {
+            self.remove_dead_session(&auth.uuid).await;
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -536,7 +559,7 @@ impl SessionManager {
             .authenticate_and_get_client(auth, &fields, cooldown_secs)
             .await?;
         stop_discord_client(client).await;
-        self.remove_session_with_ip(&auth.uuid).await;
+        self.remove_session(&auth.uuid).await;
         log::info!("session {}: activity stopped by client (logout)", auth.uuid);
         Ok(())
     }
@@ -563,10 +586,6 @@ impl SessionManager {
         }
     }
 
-    pub async fn remove_session(&self, uuid: &Uuid) -> Option<SessionState> {
-        self.remove_session_with_ip(uuid).await
-    }
-
     pub async fn is_active(&self, uuid: &Uuid) -> bool {
         let sessions = self.sessions.lock().await;
         matches!(sessions.get(uuid), Some(SessionState::Active { .. }))
@@ -579,6 +598,16 @@ impl SessionManager {
             _ => None,
         }
     }
+
+    /// Remove a session whose Discord connection died (token revoked, gateway
+    /// closed unexpectedly). Stops the client and decrements the IP counter.
+    async fn remove_dead_session(&self, uuid: &Uuid) {
+        let state = self.remove_session(uuid).await;
+        if let Some(SessionState::Active { client, .. }) = state {
+            let _ = tokio::task::spawn_blocking(move || client.stop_activity()).await;
+        }
+        log::info!("session {uuid}: removed (Discord connection died)");
+    }
 }
 
 impl SessionState {
@@ -586,6 +615,23 @@ impl SessionState {
         match self {
             Self::PendingVerify { client_ip, .. } | Self::Active { client_ip, .. } => *client_ip,
             Self::PendingConsent { .. } => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        }
+    }
+}
+
+/// Check that the Discord gateway connection is still usable.
+///
+/// `Disconnected` is expected during reconnect backoff and is therefore
+/// allowed. `TokenInvalid` means the user revoked the token in Discord.
+/// `Stopped`/`NetworkError` while the session is still registered means the
+/// gateway died unexpectedly (the session is only removed after a normal
+/// `stop_activity`, so reaching this check implies an abnormal exit).
+fn ensure_client_alive(client: &DiscordRpcClient) -> Result<(), SessionError> {
+    match client.activity_status() {
+        ActivityStatus::Ok | ActivityStatus::Disconnected | ActivityStatus::NotStarted => Ok(()),
+        ActivityStatus::TokenInvalid => Err(SessionError::TokenRevoked),
+        ActivityStatus::NetworkError | ActivityStatus::Stopped => {
+            Err(SessionError::SessionNotFound)
         }
     }
 }
@@ -627,6 +673,13 @@ async fn stop_discord_client(client: Arc<DiscordRpcClient>) {
     .await;
 }
 
+/// Build a safe (default) session error response.
+///
+/// Message details that could be used as a security oracle (e.g. AES-CBC
+/// padding / integrity errors, internal error strings) are never exposed
+/// here. Routes that want verbose messages must call
+/// [`session_error_into_response`] with `debug_mode` — and even then only
+/// non-sensitive error kinds are detailed (see [`session_error_into_response`]).
 fn make_session_error_response(err: &SessionError) -> Response {
     match err {
         SessionError::SessionNotFound | SessionError::PendingNotActive => error_response(
@@ -634,14 +687,22 @@ fn make_session_error_response(err: &SessionError) -> Response {
             "session_expired",
             "Session expired or not found. Please re-login.",
         ),
-        SessionError::AuthFailed(_) => error_response(403, "auth_failed", &err.to_string()),
+        SessionError::TokenRevoked => error_response(
+            401,
+            "token_revoked",
+            "Discord OAuth2 token revoked. Please re-login.",
+        ),
+        // Never leak padding/integrity details (padding oracle).
+        SessionError::AuthFailed(_) => {
+            error_response(403, "auth_failed", "Authentication failed")
+        }
         SessionError::ReplayDetected { .. } => {
-            error_response(403, "replay_detected", &err.to_string())
+            error_response(403, "replay_detected", "Replay detected")
         }
         SessionError::Cooldown { remaining } => {
             error_response(429, "cooldown", &format!("Wait {remaining} seconds"))
         }
-        SessionError::Other(msg) => error_response(400, "error", msg),
+        SessionError::Other(_) => error_response(400, "error", "Request failed"),
     }
 }
 
@@ -651,6 +712,11 @@ pub fn session_error_into_response(err: SessionError, debug_mode: bool) -> Respo
             401,
             "session_expired",
             "Session expired or not found. Please re-login.",
+        ),
+        SessionError::TokenRevoked => error_response(
+            401,
+            "token_revoked",
+            "Discord OAuth2 token revoked. Please re-login.",
         ),
         SessionError::AuthFailed(_) => {
             let msg = if debug_mode {

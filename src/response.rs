@@ -39,7 +39,11 @@ pub fn success_response(body: impl Into<String>) -> Response {
 
 /// Build a form-urlencoded error response.
 pub fn error_response(status: u16, code: &str, message: &str) -> Response {
-    let body = format!("error={}&message={}", code, urlencoding::encode(message));
+    let body = format!(
+        "success=false&error={}&message={}",
+        code,
+        urlencoding::encode(message)
+    );
     Response::builder()
         .status(status)
         .header("Content-Type", "application/x-www-form-urlencoded")

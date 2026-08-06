@@ -99,9 +99,43 @@ async fn refresh_user_token(
 
     match result {
         Ok(Ok(resp)) => apply_refresh(db, user, &resp, master_key).await,
-        Ok(Err(e)) => warn!("token_refresh: error for {}: {}", user.uuid, e),
+        Ok(Err(e)) => handle_refresh_error(db, user, e).await,
         Err(e) => warn!("token_refresh: error for {}: {}", user.uuid, e),
     }
+}
+
+/// Handle a refresh failure.
+///
+/// Discord returns `invalid_grant` when the refresh token has been revoked
+/// (or is invalid/expired). Such a token can never be refreshed again, so the
+/// account is deleted rather than retried every hour forever.
+async fn handle_refresh_error(db: &DatabaseConnection, user: &models::Model, e: discord_social_rpc::Error) {
+    let msg = e.to_string();
+    if is_invalid_grant(&msg) {
+        warn!(
+            "token_refresh: refresh token invalid/revoked for {}, deleting account",
+            user.uuid
+        );
+        let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
+            warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
+            return;
+        };
+        match db::delete_user(db, &uuid).await {
+            Ok(()) => info!("token_refresh: deleted user {} (token revoked)", user.uuid),
+            Err(e) => warn!(
+                "token_refresh: failed to delete revoked user {}: {}",
+                user.uuid, e
+            ),
+        }
+    } else {
+        warn!("token_refresh: error for {}: {}", user.uuid, msg);
+    }
+}
+
+/// Discord returns `invalid_grant` (HTTP 400) when a refresh token is revoked
+/// or has already been used.
+fn is_invalid_grant(error_msg: &str) -> bool {
+    error_msg.contains("invalid_grant")
 }
 
 async fn apply_refresh(

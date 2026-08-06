@@ -61,17 +61,18 @@ pub async fn handler(
     let stored_key = crypto::decrypt_bytes_at_rest(&user.aes_key, &state.config.master_key)
         .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
 
+    let fail_msg = if debug {
+        "AES key does not match".to_string()
+    } else {
+        "Authentication failed".to_string()
+    };
+
     let Ok(supplied_key) = hex::decode(&supplied_key_hex) else {
-        return Err(error_response(400, "auth_failed", "AES key does not match"));
+        return Err(error_response(400, "auth_failed", &fail_msg));
     };
 
     if !crypto::constant_time_eq_bytes(&stored_key, &supplied_key) {
-        let msg = if debug {
-            "AES key does not match".to_string()
-        } else {
-            "Authentication failed".to_string()
-        };
-        return Err(error_response(403, "auth_failed", &msg));
+        return Err(error_response(403, "auth_failed", &fail_msg));
     }
 
     let json = build_export_json(&user, debug)?;
