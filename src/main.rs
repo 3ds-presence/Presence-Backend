@@ -32,6 +32,7 @@ mod db;
 mod logging;
 mod middleware;
 mod models;
+mod oauth_state;
 mod response;
 mod routes;
 mod session;
@@ -40,6 +41,7 @@ mod utils;
 mod validation;
 
 use config::Config;
+use oauth_state::OauthStateStore;
 use session::SessionManager;
 
 /// Shared application state available to all route handlers.
@@ -48,6 +50,7 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub discord_rpc: DiscordSocialRpcAdmin,
     pub session_manager: Arc<SessionManager>,
+    pub oauth_state_store: Arc<OauthStateStore>,
     pub activity_generator: ActivityGenerator,
 }
 
@@ -61,16 +64,19 @@ async fn main() {
     let db = init_database(&config).await;
     let discord_rpc = init_discord_rpc(&config);
     let session_manager = Arc::new(SessionManager::new());
+    let oauth_state_store = Arc::new(OauthStateStore::new());
     let activity_generator = init_activity_generator(&config).await;
     let state = build_state(
         &config,
         db,
         discord_rpc,
         session_manager.clone(),
+        oauth_state_store.clone(),
         activity_generator,
     );
 
     spawn_timeout_task(session_manager.clone());
+    spawn_oauth_state_cleanup_task(oauth_state_store);
     spawn_token_refresh_task(&state);
     spawn_cleanup_task(state.db.clone());
 
@@ -135,6 +141,7 @@ fn build_state(
     db: DatabaseConnection,
     discord_rpc: DiscordSocialRpcAdmin,
     session_manager: Arc<SessionManager>,
+    oauth_state_store: Arc<OauthStateStore>,
     activity_generator: ActivityGenerator,
 ) -> Arc<AppState> {
     Arc::new(AppState {
@@ -142,6 +149,7 @@ fn build_state(
         db,
         discord_rpc,
         session_manager,
+        oauth_state_store,
         activity_generator,
     })
 }
@@ -150,6 +158,17 @@ fn build_state(
 fn spawn_timeout_task(session_manager: Arc<SessionManager>) {
     tokio::spawn(async move {
         tasks::timeout::run(session_manager, 60).await;
+    });
+}
+
+/// Spawn the background task that removes expired `OAuth2` states.
+fn spawn_oauth_state_cleanup_task(oauth_state_store: Arc<OauthStateStore>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_mins(1));
+        loop {
+            interval.tick().await;
+            oauth_state_store.cleanup();
+        }
     });
 }
 
@@ -178,6 +197,7 @@ fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(middleware::request_logger))
+        .route("/oauth/start", post(routes::oauth_start::handler))
         .route("/register", post(routes::register::handler))
         .route("/confirm-consent", post(routes::confirm_consent::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))

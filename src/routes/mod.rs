@@ -22,5 +22,6 @@ pub mod export_data;
 pub mod login;
 pub mod login_verify;
 pub mod logout;
+pub mod oauth_start;
 pub mod register;
 pub mod reset_aes;

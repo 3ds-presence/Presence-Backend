@@ -32,6 +32,7 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct RegisterForm {
     pub code: String,
+    pub state: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -45,6 +46,16 @@ pub async fn handler(
     Form(form): Form<RegisterForm>,
 ) -> Result<Response, Response> {
     let code = validation::validate_code(&form.code)?.to_owned();
+    let state_value = validation::validate_state(&form.state)?;
+
+    // Consume the one-time OAuth2 state BEFORE touching Discord. An unknown,
+    // expired, or already-used state is rejected outright, so a forged code
+    // can never trigger a call to Discord's token endpoint.
+    state
+        .oauth_state_store
+        .consume(state_value)
+        .ok_or_else(|| error_response(400, "invalid_state", "OAuth2 state is invalid or expired"))?;
+
     let discord_rpc = state.discord_rpc.clone();
     let debug = state.config.debug_mode;
 

@@ -48,6 +48,12 @@ pub const MII_MAX_LEN: usize = 192;
 /// Max length of a Discord `OAuth2` code.
 pub const CODE_MAX_LEN: usize = 128;
 
+/// Expected length of the `OAuth2` `state` value (32 hex chars).
+pub const STATE_LEN: usize = 32;
+
+/// Max length of a Cloudflare Turnstile token.
+pub const TURNSTILE_TOKEN_MAX_LEN: usize = 2048;
+
 /// Build an "invalid field" error with a given message for a given field.
 fn field_error(field_name: &str, message: &str) -> AppError {
     AppError(Box::new(error_response(
@@ -191,4 +197,16 @@ pub fn validate_mii(mii: Option<String>) -> Result<Option<String>, AppError> {
 pub fn validate_code(code: &str) -> Result<&str, AppError> {
     check_max_len(code, CODE_MAX_LEN, "code")?;
     Ok(code)
+}
+
+/// Validate an `OAuth2` `state` value (exactly 32 hex chars) and return it.
+pub fn validate_state(state: &str) -> Result<&str, AppError> {
+    check_hex_exact(state, STATE_LEN, "state")?;
+    Ok(state)
+}
+
+/// Validate a Cloudflare Turnstile token (non-empty, max 2048 chars).
+pub fn validate_turnstile_token(token: &str) -> Result<&str, AppError> {
+    check_max_len(token, TURNSTILE_TOKEN_MAX_LEN, "turnstile_token")?;
+    Ok(token)
 }
