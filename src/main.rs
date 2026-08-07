@@ -29,6 +29,8 @@ mod auth;
 mod config;
 mod crypto;
 mod db;
+mod logging;
+mod middleware;
 mod models;
 mod response;
 mod routes;
@@ -52,7 +54,7 @@ pub struct AppState {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-    env_logger::init();
+    logging::init();
     info!("3DS Presence Server starting...");
 
     let config = load_config();
@@ -175,6 +177,7 @@ fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        .layer(axum::middleware::from_fn(middleware::request_logger))
         .route("/register", post(routes::register::handler))
         .route("/confirm-consent", post(routes::confirm_consent::handler))
         .route("/reset_aes", post(routes::reset_aes::handler))

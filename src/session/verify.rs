@@ -51,6 +51,7 @@ impl SessionManager {
         let mut ip_counts = self.ip_counts.lock().await;
         let count = ip_counts.entry(client_ip).or_insert(0);
         if *count >= max_per_ip {
+            log::warn!("evt=rate_limited ip={client_ip} limit={max_per_ip} stage=pending");
             return Err("too many sessions from this IP");
         }
         *count += 1;
@@ -152,7 +153,7 @@ impl SessionManager {
             },
         );
         log::info!(
-            "session {}: Discord client created and gateway started",
+            "evt=discord_gateway_started uuid={}",
             params.auth.uuid
         );
     }
@@ -173,6 +174,7 @@ fn verify_nonce(auth: &Auth, aes_key: &[u8; 32], expected_nonce: u64) -> Result<
     }
     let extracted_nonce = crypto::u64_from_be_bytes(&plaintext[..8]);
     if extracted_nonce != expected_nonce {
+        log::warn!("evt=nonce_mismatch uuid={} expected={expected_nonce}", auth.uuid);
         return Err("nonce mismatch".into());
     }
     Ok(())

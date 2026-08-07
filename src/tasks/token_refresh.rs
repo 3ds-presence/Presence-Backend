@@ -31,7 +31,7 @@ pub async fn run_with_master_key(
     admin: DiscordSocialRpcAdmin,
     master_key: &[u8; crypto::MASTER_KEY_LEN],
 ) {
-    info!("token refresh task started");
+    info!("evt=token_refresh_task_started");
 
     loop {
         tokio::time::sleep(Duration::from_hours(1)).await;
@@ -40,7 +40,7 @@ pub async fn run_with_master_key(
         let users = match db::get_users_needing_refresh(&db, margin_secs).await {
             Ok(users) => users,
             Err(e) => {
-                warn!("token_refresh: failed to query users: {e}");
+                warn!("evt=token_refresh_query_failed error={e}");
                 continue;
             }
         };
@@ -49,7 +49,7 @@ pub async fn run_with_master_key(
             continue;
         }
 
-        info!("token_refresh: refreshing tokens for {} users", users.len());
+        info!("evt=token_refresh_batch_started users={}", users.len());
 
         let semaphore = Arc::new(tokio::sync::Semaphore::new(10));
         let mut handles = Vec::new();
@@ -100,7 +100,7 @@ async fn refresh_user_token(
     match result {
         Ok(Ok(resp)) => apply_refresh(db, user, &resp, master_key).await,
         Ok(Err(e)) => handle_refresh_error(db, user, e).await,
-        Err(e) => warn!("token_refresh: error for {}: {}", user.uuid, e),
+        Err(e) => warn!("evt=token_refresh_spawn_error uuid={} error={e}", user.uuid),
     }
 }
 
@@ -117,22 +117,22 @@ async fn handle_refresh_error(
     let msg = e.to_string();
     if is_invalid_grant(&msg) {
         warn!(
-            "token_refresh: refresh token invalid/revoked for {}, deleting account",
+            "evt=token_refresh_invalid_grant uuid={} deleting=true",
             user.uuid
         );
         let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
-            warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
+            warn!("evt=token_refresh_invalid_uuid uuid={}", user.uuid);
             return;
         };
         match db::delete_user(db, &uuid).await {
-            Ok(()) => info!("token_refresh: deleted user {} (token revoked)", user.uuid),
+            Ok(()) => info!("evt=token_refresh_user_deleted uuid={} reason=revoked", user.uuid),
             Err(e) => warn!(
-                "token_refresh: failed to delete revoked user {}: {}",
-                user.uuid, e
+                "evt=token_refresh_delete_failed uuid={} error={e}",
+                user.uuid
             ),
         }
     } else {
-        warn!("token_refresh: error for {}: {}", user.uuid, msg);
+        warn!("evt=token_refresh_error uuid={} error={msg}", user.uuid);
     }
 }
 
@@ -156,7 +156,7 @@ async fn apply_refresh(
         .unwrap_or_else(|| user.refresh_token.clone());
 
     let Ok(uuid) = uuid::Uuid::parse_str(&user.uuid) else {
-        warn!("token_refresh: invalid UUID in DB: {}", user.uuid);
+        warn!("evt=token_refresh_invalid_uuid uuid={}", user.uuid);
         return;
     };
 
@@ -171,10 +171,10 @@ async fn apply_refresh(
     .await
     {
         warn!(
-            "token_refresh: failed to update tokens for {}: {}",
-            user.uuid, e
+            "evt=token_refresh_update_failed uuid={} error={e}",
+            user.uuid
         );
     } else {
-        info!("token_refresh: refreshed tokens for {}", user.uuid);
+        info!("evt=token_refresh_succeeded uuid={}", user.uuid);
     }
 }

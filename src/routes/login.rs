@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::{extract::State, http::HeaderMap, Form};
@@ -24,6 +23,7 @@ use serde::Deserialize;
 use crate::crypto;
 use crate::db;
 use crate::response::{error_response, success_response};
+use crate::utils;
 use crate::validation;
 use crate::AppState;
 
@@ -48,39 +48,22 @@ pub async fn handler(
     let aes_key = crypto::decrypt_aes_key_at_rest(&user.aes_key, &state.config.master_key)
         .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
 
-    let client_ip = extract_real_ip(&headers).map_err(|e| error_response(400, "missing_ip", e))?;
+    let client_ip = utils::net::extract_client_ip(&headers)
+        .ok_or_else(|| error_response(400, "missing_ip", "Could not determine client IP address"))?;
 
-    info!("Login request for UUID {uuid} from IP {client_ip}");
+    info!("evt=login_started uuid={uuid} ip={client_ip}");
 
     let nonce = state
         .session_manager
         .create_pending(uuid, aes_key, client_ip, state.config.max_clients_per_ip)
         .await
-        .map_err(|e| error_response(429, "rate_limited", e))?;
+        .map_err(|e| {
+            log::warn!("evt=rate_limited uuid={uuid} ip={client_ip} reason={e}");
+            error_response(429, "rate_limited", e)
+        })?;
 
     let body = format!("nonce={nonce}");
 
     Ok(success_response(body))
 }
 
-/// Extract client IP from reverse proxy headers (X-Real-IP, then X-Forwarded-For).
-fn extract_real_ip(headers: &HeaderMap) -> Result<IpAddr, &'static str> {
-    try_extract_x_real_ip(headers)
-        .or_else(|| try_extract_x_forwarded_for(headers))
-        .ok_or("Could not determine client IP address")
-}
-
-/// Try to parse the client IP from the X-Real-IP header.
-fn try_extract_x_real_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    let value = headers.get("x-real-ip")?;
-    let s = value.to_str().ok()?;
-    s.parse::<IpAddr>().ok()
-}
-
-/// Try to parse the client IP from the X-Forwarded-For header (first address).
-fn try_extract_x_forwarded_for(headers: &HeaderMap) -> Option<IpAddr> {
-    let value = headers.get("x-forwarded-for")?;
-    let s = value.to_str().ok()?;
-    let first = s.split(',').next()?;
-    first.trim().parse::<IpAddr>().ok()
-}

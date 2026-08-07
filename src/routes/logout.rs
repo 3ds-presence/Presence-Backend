@@ -37,11 +37,12 @@ pub async fn handler(
 ) -> Result<axum::response::Response, axum::response::Response> {
     let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
+    log::info!("evt=logout uuid={}", auth.uuid);
     state
         .session_manager
         .stop_activity(&auth, 0)
         .await
-        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode, Some(&auth.uuid)))?;
 
     Ok(success_response("success=true"))
 }

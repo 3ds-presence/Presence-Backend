@@ -15,6 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use axum::response::{IntoResponse, Response};
+use uuid::Uuid;
 
 use crate::response::error_response;
 
@@ -24,13 +25,8 @@ pub enum SessionError {
     SessionNotFound,
     PendingNotActive,
     AuthFailed(String),
-    ReplayDetected {
-        counter: u64,
-        last: u64,
-    },
-    Cooldown {
-        remaining: u64,
-    },
+    ReplayDetected { counter: u64, last: u64 },
+    Cooldown { remaining: u64 },
     /// The Discord `OAuth2` token was revoked or rejected by Discord.
     TokenRevoked,
     Other(String),
@@ -56,7 +52,7 @@ impl std::error::Error for SessionError {}
 
 impl IntoResponse for SessionError {
     fn into_response(self) -> Response {
-        session_error_to_response(self, false)
+        session_error_to_response(self, false, None)
     }
 }
 
@@ -72,56 +68,70 @@ impl From<String> for SessionError {
     }
 }
 
-/// Build a safe session error response.
-///
-/// Message details that could be used as a security oracle (e.g. AES-CBC
-/// padding / integrity errors, internal error strings) are never exposed
-/// unless `debug_mode` is on, and even then only non-sensitive error kinds
-/// are detailed.
-fn session_error_to_response(err: SessionError, debug_mode: bool) -> Response {
+/// Map a session error to a safe response, logging security-relevant events
+/// with an `evt=...` marker and the session `uuid` when available. The request
+/// middleware enriches every line with `req_id`/`ip`/`path`, so a forensic
+/// timeline of an attack can be reconstructed with a single grep.
+fn session_error_to_response(err: SessionError, debug_mode: bool, uuid: Option<&Uuid>) -> Response {
+    let uid_str = uuid.map_or_else(|| "unknown".to_string(), ToString::to_string);
     match err {
-        SessionError::SessionNotFound | SessionError::PendingNotActive => error_response(
-            401,
-            "session_expired",
-            "Session expired or not found. Please re-login.",
-        ),
-        SessionError::TokenRevoked => error_response(
-            401,
-            "token_revoked",
-            "Discord OAuth2 token revoked. Please re-login.",
-        ),
-        SessionError::AuthFailed(_) => {
-            let msg = if debug_mode {
-                err.to_string()
+        SessionError::SessionNotFound | SessionError::PendingNotActive => {
+            log::debug!("evt=session_not_found uuid={uid_str}");
+            error_response(
+                401,
+                "session_expired",
+                "Session expired or not found. Please re-login.",
+            )
+        }
+        SessionError::TokenRevoked => {
+            log::warn!("evt=token_revoked uuid={uid_str}");
+            error_response(
+                401,
+                "token_revoked",
+                "Discord OAuth2 token revoked. Please re-login.",
+            )
+        }
+        SessionError::AuthFailed(msg) => {
+            log::warn!("evt=auth_failed uuid={uid_str} reason=\"{msg}\"");
+            let client_msg = if debug_mode {
+                format!("auth verification failed: {msg}")
             } else {
                 "Authentication failed".to_string()
             };
-            error_response(403, "auth_failed", &msg)
+            error_response(403, "auth_failed", &client_msg)
         }
-        SessionError::ReplayDetected { .. } => {
-            let msg = if debug_mode {
-                err.to_string()
+        SessionError::ReplayDetected { counter, last } => {
+            log::warn!("evt=replay_detected uuid={uid_str} counter={counter} last={last}");
+            let client_msg = if debug_mode {
+                format!("replay detected: counter {counter} <= last {last}")
             } else {
                 "Replay detected".to_string()
             };
-            error_response(403, "replay_detected", &msg)
+            error_response(403, "replay_detected", &client_msg)
         }
         SessionError::Cooldown { remaining } => {
+            log::debug!("evt=cooldown uuid={uid_str} remaining={remaining}");
             error_response(429, "cooldown", &format!("Wait {remaining} seconds"))
         }
         SessionError::Other(msg) => {
-            let msg = if debug_mode {
+            log::warn!("evt=session_error uuid={uid_str} reason=\"{msg}\"");
+            let client_msg = if debug_mode {
                 msg
             } else {
                 "Request failed".to_string()
             };
-            error_response(400, "error", &msg)
+            error_response(400, "error", &client_msg)
         }
     }
 }
 
 /// Public wrapper used by routes to convert a `SessionError` into a response,
-/// with optional verbose messages in debug mode.
-pub fn session_error_into_response(err: SessionError, debug_mode: bool) -> Response {
-    session_error_to_response(err, debug_mode)
+/// with optional verbose messages in debug mode. Pass `uuid` when known so
+/// security events are attributed to the right account.
+pub fn session_error_into_response(
+    err: SessionError,
+    debug_mode: bool,
+    uuid: Option<&Uuid>,
+) -> Response {
+    session_error_to_response(err, debug_mode, uuid)
 }

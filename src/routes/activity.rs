@@ -51,11 +51,12 @@ pub async fn set_handler(
 
     let game_info = generate_game_info(titleid, name, publisher, extra.as_ref())?;
 
+    log::info!("evt=activity_set uuid={}", auth.uuid);
     state
         .session_manager
         .update_activity(&state, &auth, game_info, extra)
         .await
-        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode, Some(&auth.uuid)))?;
 
     Ok(success_response("success=true"))
 }
@@ -101,11 +102,12 @@ pub async fn heartbeat_handler(
 ) -> Result<Response, Response> {
     let auth = Auth::new(&form.uuid, &form.auth_hex)?;
 
+    log::debug!("evt=activity_heartbeat uuid={}", auth.uuid);
     state
         .session_manager
         .heartbeat(&auth, state.config.activity_cooldown_secs)
         .await
-        .map_err(|e| session_error_into_response(e, state.config.debug_mode))?;
+        .map_err(|e| session_error_into_response(e, state.config.debug_mode, Some(&auth.uuid)))?;
 
     Ok(success_response("success=true"))
 }

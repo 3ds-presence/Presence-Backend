@@ -27,14 +27,14 @@ pub async fn run(db: DatabaseConnection) {
     loop {
         sleep(Duration::from_hours(24)).await;
 
-        log::info!("Running cleanup of inactive accounts (older than 3 years)...");
+        log::info!("evt=cleanup_started threshold_years=3");
         match db::delete_inactive_users(&db, THREE_YEARS_SECS).await {
             Ok(count) if count > 0 => {
-                log::info!("Cleanup complete: {count} inactive account(s) deleted");
+                log::info!("evt=cleanup_complete count={count}");
             }
             Ok(_) => {}
             Err(e) => {
-                log::error!("Cleanup query failed: {e}");
+                log::error!("evt=cleanup_failed error={e}");
             }
         }
     }
