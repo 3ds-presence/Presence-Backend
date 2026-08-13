@@ -51,9 +51,8 @@ pub async fn authenticate_aes_key(
 ) -> Result<models::Model, Response> {
     let user = fetch_user_or_404(db, uuid).await?;
 
-    let stored_key =
-        crypto::decrypt_aes_key_at_rest(&user.aes_key, master_key)
-            .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
+    let stored_key = crypto::decrypt_aes_key_at_rest(&user.aes_key, master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
 
     let fail_msg = if debug_mode {
         "AES key does not match".to_string()

@@ -18,8 +18,8 @@ use std::time::Instant;
 
 use axum::body::Body;
 use axum::http::Request;
-use axum::response::Response;
 use axum::middleware::Next;
+use axum::response::Response;
 use uuid::Uuid;
 
 use crate::logging::{mask_body, RequestCtx, REQUEST_CTX};
@@ -39,7 +39,8 @@ pub async fn request_logger(mut req: Request<Body>, next: Next) -> Response {
     let start = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    let ip = utils::net::extract_client_ip(req.headers()).map_or_else(|| "unknown".to_string(), |ip| ip.to_string());
+    let ip = utils::net::extract_client_ip(req.headers())
+        .map_or_else(|| "unknown".to_string(), |ip| ip.to_string());
     let req_id = Uuid::new_v4().to_string();
 
     let body_snapshot = if log::log_enabled!(log::Level::Debug) {
@@ -88,4 +89,3 @@ pub async fn request_logger(mut req: Request<Body>, next: Next) -> Response {
     }
     response
 }
-

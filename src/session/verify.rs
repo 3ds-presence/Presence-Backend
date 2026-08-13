@@ -22,10 +22,10 @@ use std::time::{Duration, Instant};
 use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use uuid::Uuid;
 
-use activity_generator::UserInfo;
+use super::{SessionError, SessionManager, SessionState};
 use crate::auth::Auth;
 use crate::crypto;
-use super::{SessionError, SessionManager, SessionState};
+use activity_generator::UserInfo;
 
 /// Parameters for promoting a pending session to active.
 pub struct PromoteToActiveParams<'a> {
@@ -152,10 +152,7 @@ impl SessionManager {
                 user_info: params.user_info,
             },
         );
-        log::info!(
-            "evt=discord_gateway_started uuid={}",
-            params.auth.uuid
-        );
+        log::info!("evt=discord_gateway_started uuid={}", params.auth.uuid);
     }
 }
 
@@ -174,7 +171,10 @@ fn verify_nonce(auth: &Auth, aes_key: &[u8; 32], expected_nonce: u64) -> Result<
     }
     let extracted_nonce = crypto::u64_from_be_bytes(&plaintext[..8]);
     if extracted_nonce != expected_nonce {
-        log::warn!("evt=nonce_mismatch uuid={} expected={expected_nonce}", auth.uuid);
+        log::warn!(
+            "evt=nonce_mismatch uuid={} expected={expected_nonce}",
+            auth.uuid
+        );
         return Err("nonce mismatch".into());
     }
     Ok(())

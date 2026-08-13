@@ -125,7 +125,10 @@ async fn handle_refresh_error(
             return;
         };
         match db::delete_user(db, &uuid).await {
-            Ok(()) => info!("evt=token_refresh_user_deleted uuid={} reason=revoked", user.uuid),
+            Ok(()) => info!(
+                "evt=token_refresh_user_deleted uuid={} reason=revoked",
+                user.uuid
+            ),
             Err(e) => warn!(
                 "evt=token_refresh_delete_failed uuid={} error={e}",
                 user.uuid

@@ -85,7 +85,13 @@ pub fn partial(value: &str) -> String {
 /// Never log `auth_hex`, `cipher_hex`, `aes_key_hex`, `temp_token` or the
 /// Discord OAuth `code` in clear — a full value would allow account takeover.
 pub fn mask_body(raw: &str) -> String {
-    const SENSITIVE: &[&str] = &["auth_hex", "cipher_hex", "aes_key_hex", "temp_token", "code"];
+    const SENSITIVE: &[&str] = &[
+        "auth_hex",
+        "cipher_hex",
+        "aes_key_hex",
+        "temp_token",
+        "code",
+    ];
 
     raw.split('&')
         .map(|pair| {

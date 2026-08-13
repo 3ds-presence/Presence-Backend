@@ -48,8 +48,9 @@ pub async fn handler(
     let aes_key = crypto::decrypt_aes_key_at_rest(&user.aes_key, &state.config.master_key)
         .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
 
-    let client_ip = utils::net::extract_client_ip(&headers)
-        .ok_or_else(|| error_response(400, "missing_ip", "Could not determine client IP address"))?;
+    let client_ip = utils::net::extract_client_ip(&headers).ok_or_else(|| {
+        error_response(400, "missing_ip", "Could not determine client IP address")
+    })?;
 
     info!("evt=login_started uuid={uuid} ip={client_ip}");
 
@@ -66,4 +67,3 @@ pub async fn handler(
 
     Ok(success_response(body))
 }
-

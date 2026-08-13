@@ -54,7 +54,9 @@ pub async fn handler(
     state
         .oauth_state_store
         .consume(state_value)
-        .ok_or_else(|| error_response(400, "invalid_state", "OAuth2 state is invalid or expired"))?;
+        .ok_or_else(|| {
+            error_response(400, "invalid_state", "OAuth2 state is invalid or expired")
+        })?;
 
     let discord_rpc = state.discord_rpc.clone();
     let debug = state.config.debug_mode;
@@ -165,8 +167,9 @@ async fn handle_returning_user(
     let _ = db::update_user_last_connected(&state.db, &uuid, now).await;
 
     // The stored AES key is encrypted at rest — decrypt it for the client.
-    let decrypted = crypto::decrypt_aes_key_at_rest(&existing_user.aes_key, &state.config.master_key)
-        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
+    let decrypted =
+        crypto::decrypt_aes_key_at_rest(&existing_user.aes_key, &state.config.master_key)
+            .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
     let aes_hex = hex::encode(decrypted);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
     Ok(success_response(body))
@@ -189,9 +192,7 @@ async fn handle_new_user_requires_consent(
         )
         .await;
 
-    log::info!(
-        "new user {discord_id} requires consent, temp_token={temp_token}"
-    );
+    log::info!("new user {discord_id} requires consent, temp_token={temp_token}");
 
     let body = format!("needs_consent=true&temp_token={temp_token}");
     Ok(success_response(body))

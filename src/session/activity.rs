@@ -23,11 +23,11 @@ use activity_generator::info::GameInfo;
 use discord_social_rpc::{Activity, ActivityStatus, DiscordRpcClient};
 use uuid::Uuid;
 
-use activity_generator::UserInfo;
+use super::{SessionError, SessionManager, SessionState};
 use crate::auth::Auth;
 use crate::crypto::{self, url_encode_3ds};
 use crate::AppState;
-use super::{SessionError, SessionManager, SessionState};
+use activity_generator::UserInfo;
 
 impl SessionManager {
     async fn authenticate_and_get_client(

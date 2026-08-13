@@ -20,7 +20,6 @@ use axum::response::Response;
 use axum::{extract::State, Form};
 use serde::Deserialize;
 
-use activity_generator::UserInfo;
 use crate::auth::Auth;
 use crate::crypto;
 use crate::response::{error_response, success_response};
@@ -29,6 +28,7 @@ use crate::session::session_error_into_response;
 use crate::utils::mii_utils;
 use crate::validation;
 use crate::AppState;
+use activity_generator::UserInfo;
 
 #[derive(Deserialize)]
 pub struct LoginVerifyForm {

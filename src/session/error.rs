@@ -25,8 +25,13 @@ pub enum SessionError {
     SessionNotFound,
     PendingNotActive,
     AuthFailed(String),
-    ReplayDetected { counter: u64, last: u64 },
-    Cooldown { remaining: u64 },
+    ReplayDetected {
+        counter: u64,
+        last: u64,
+    },
+    Cooldown {
+        remaining: u64,
+    },
     /// The Discord `OAuth2` token was revoked or rejected by Discord.
     TokenRevoked,
     Other(String),
