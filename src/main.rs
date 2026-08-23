@@ -75,7 +75,7 @@ async fn main() {
         activity_generator,
     );
 
-    spawn_timeout_task(session_manager.clone());
+    spawn_timeout_task(session_manager.clone(), config.session_timeout_secs);
     spawn_oauth_state_cleanup_task(oauth_state_store);
     spawn_token_refresh_task(&state);
     spawn_cleanup_task(state.db.clone());
@@ -155,9 +155,9 @@ fn build_state(
 }
 
 /// Spawn the background task that cleans up inactive sessions.
-fn spawn_timeout_task(session_manager: Arc<SessionManager>) {
+fn spawn_timeout_task(session_manager: Arc<SessionManager>, timeout_secs: u64) {
     tokio::spawn(async move {
-        tasks::timeout::run(session_manager, 60).await;
+        tasks::timeout::run(session_manager, timeout_secs).await;
     });
 }
 

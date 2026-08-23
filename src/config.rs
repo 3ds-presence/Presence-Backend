@@ -35,6 +35,8 @@ pub struct Config {
     pub database_url: String,
     /// Minimum seconds between two activity updates for the same client.
     pub activity_cooldown_secs: u64,
+    /// Seconds of inactivity after which a 3DS session is removed.
+    pub session_timeout_secs: u64,
     /// Maximum number of concurrent sessions per IP address.
     pub max_clients_per_ip: usize,
     /// Server listen address.
@@ -74,6 +76,10 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5),
+            session_timeout_secs: env::var("SESSION_TIMEOUT_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60),
             max_clients_per_ip: env::var("MAX_CLIENTS_PER_IP")
                 .ok()
                 .and_then(|s| s.parse().ok())
