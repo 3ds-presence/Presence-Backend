@@ -69,7 +69,7 @@ pub async fn handler(
         error_response(400, "missing_ip", "Could not determine client IP address")
     })?;
 
-    log::debug!("evt=login_verify uuid={} ip={client_ip}", auth.uuid);
+    log::info!("evt=login_verify uuid={} ip={client_ip}", auth.uuid);
     state
         .session_manager
         .verify_and_activate(

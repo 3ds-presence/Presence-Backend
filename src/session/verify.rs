@@ -71,27 +71,33 @@ impl SessionManager {
         let key = (auth.uuid, client_ip);
         let mut pending = self.pending_logins.lock().await;
 
-        let (nonce, aes_key) = match pending.get(&key) {
-            Some(SessionState::PendingVerify { nonce, aes_key, .. }) => (*nonce, *aes_key),
-            _ => {
-                return Err(SessionError::from(
-                    "no pending login for this (uuid, ip)",
-                ));
-            }
-        };
+        let (nonce, aes_key) =
+            if let Some(SessionState::PendingVerify { nonce, aes_key, .. }) = pending.get(&key) {
+                (*nonce, *aes_key)
+            } else {
+                // Diagnostic: dump every pending key we hold for this UUID
+                let known_ips: Vec<String> = pending
+                    .keys()
+                    .filter(|(u, _)| u == &auth.uuid)
+                    .map(|(_, ip)| ip.to_string())
+                    .collect();
+                log::warn!(
+                "evt=pending_login_miss uuid={} requested_ip={client_ip} known_ips={known_ips:?}",
+                auth.uuid
+            );
+                return Err(SessionError::from("no pending login for this (uuid, ip)"));
+            };
 
         // Verify the nonce by decrypting the auth hex with the stored AES key.
-        let cipher_bytes = hex::decode(auth.hex()).map_err(|_| {
-            SessionError::from("invalid hex in auth cipher")
-        })?;
+        let cipher_bytes = hex::decode(auth.hex())
+            .map_err(|_| SessionError::from("invalid hex in auth cipher"))?;
         if cipher_bytes.len() != 16 {
             return Err(SessionError::from("invalid cipher length"));
         }
         let mut cipher_arr = [0u8; 16];
         cipher_arr.copy_from_slice(&cipher_bytes);
-        let plaintext = crate::crypto::decrypt_aes_cbc(&cipher_arr, &aes_key).map_err(|_| {
-            SessionError::from("decryption failed — wrong AES key?")
-        })?;
+        let plaintext = crate::crypto::decrypt_aes_cbc(&cipher_arr, &aes_key)
+            .map_err(|_| SessionError::from("decryption failed — wrong AES key?"))?;
         let extracted_nonce = crate::crypto::u64_from_be_bytes(&plaintext);
         if extracted_nonce != nonce {
             pending.remove(&key); // consume on mismatch too — one shot
@@ -104,7 +110,6 @@ impl SessionManager {
     }
 
     // ── Login verification ──────────────────────────────────────────────
-
 
     /// Verify a pending login challenge and promote/update the active session.
     ///
@@ -145,10 +150,7 @@ impl SessionManager {
                 user_info,
             };
             self.update_active_session(meta, client).await;
-            log::info!(
-                "evt=session_reused uuid={} ip={client_ip}",
-                auth.uuid
-            );
+            log::info!("evt=session_reused uuid={} ip={client_ip}", auth.uuid);
         } else {
             // First connection (or previous session already cleaned up):
             // create a new Discord client and register a fresh session.
@@ -197,11 +199,7 @@ impl SessionManager {
         Ok(client)
     }
 
-    async fn promote_to_active(
-        &self,
-        meta: ActiveSessionMeta,
-        client: Arc<DiscordRpcClient>,
-    ) {
+    async fn promote_to_active(&self, meta: ActiveSessionMeta, client: Arc<DiscordRpcClient>) {
         // Increment IP count for the new active session.
         {
             let mut ip_counts = self.ip_counts.lock().await;
