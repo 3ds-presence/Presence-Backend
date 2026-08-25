@@ -14,34 +14,34 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use discord_social_rpc::DiscordRpcClient;
 use uuid::Uuid;
 
-use super::{SessionManager, SessionState, PENDING_CONSENT_TIMEOUT_SECS, PENDING_TIMEOUT_SECS};
+use super::{SessionManager, SessionState};
+
+/// Timeout for pending login challenges (seconds).
+const PENDING_TIMEOUT_SECS: u64 = 30;
+/// Timeout for pending consent sessions (seconds).
+const PENDING_CONSENT_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
 impl SessionManager {
+    /// Return UUIDs of active sessions that have been inactive too long.
+    /// `sessions` only contains `Active` entries, so no variant check needed.
     pub async fn get_expired_active_sessions(&self, timeout_secs: u64) -> Vec<Uuid> {
         let sessions = self.sessions.lock().await;
         sessions
             .iter()
-            .filter_map(|(uuid, state)| Self::is_expired(state, timeout_secs).then_some(*uuid))
+            .filter_map(|(uuid, state)| {
+                if let SessionState::Active { last_activity, .. } = state {
+                    (last_activity.elapsed().as_secs() > timeout_secs).then_some(*uuid)
+                } else {
+                    None
+                }
+            })
             .collect()
-    }
-
-    fn is_expired(state: &SessionState, timeout_secs: u64) -> bool {
-        match state {
-            SessionState::Active { last_activity, .. } => {
-                last_activity.elapsed().as_secs() > timeout_secs
-            }
-            SessionState::PendingVerify { created_at, .. } => {
-                created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS
-            }
-            SessionState::PendingConsent { created_at, .. } => {
-                created_at.elapsed().as_secs() > PENDING_CONSENT_TIMEOUT_SECS
-            }
-        }
     }
 
     pub async fn is_active(&self, uuid: &Uuid) -> bool {
@@ -61,5 +61,56 @@ impl SessionManager {
     /// closed unexpectedly). Stops the client and decrements the IP counter.
     pub(super) async fn remove_dead_session(&self, uuid: &Uuid) {
         self.terminate_session(uuid).await;
+    }
+
+    /// Return expired pending logins for cleanup.
+    pub async fn get_expired_pending_logins(&self) -> Vec<(Uuid, IpAddr)> {
+        self.pending_logins
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(key, state)| {
+                let SessionState::PendingVerify { created_at, .. } = state else {
+                    return None;
+                };
+                (created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS).then_some(*key)
+            })
+            .collect()
+    }
+
+    /// Return expired pending consents for cleanup.
+    pub async fn get_expired_pending_consents(&self) -> Vec<Uuid> {
+        self.pending_consents
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(token, state)| {
+                let SessionState::PendingConsent { created_at, .. } = state else {
+                    return None;
+                };
+                (created_at.elapsed().as_secs() > PENDING_CONSENT_TIMEOUT_SECS).then_some(*token)
+            })
+            .collect()
+    }
+
+    /// Remove a pending login by key.
+    pub async fn remove_pending_login(&self, uuid: Uuid, ip: IpAddr) {
+        self.pending_logins.lock().await.remove(&(uuid, ip));
+    }
+
+    /// Remove a pending consent by token.
+    pub async fn remove_pending_consent(&self, temp_token: &Uuid) {
+        self.pending_consents.lock().await.remove(temp_token);
+    }
+
+    /// Remove an active session by UUID, decrement IP counter, and return its state.
+    pub async fn remove_session(&self, uuid: &Uuid) -> Option<SessionState> {
+        let state = self.sessions.lock().await.remove(uuid);
+        if let Some(ref s) = state {
+            let mut ip_counts = self.ip_counts.lock().await;
+            let ip = s.client_ip();
+            Self::decrement_ip(&mut ip_counts, ip);
+        }
+        state
     }
 }

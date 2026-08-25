@@ -24,9 +24,10 @@ use uuid::Uuid;
 
 use activity_generator::UserInfo;
 
-/// State of a session during the login flow.
+/// State of a session.
 pub enum SessionState {
-    /// Waiting for the client to prove they have the AES key.
+    /// Waiting for the client to prove they have the AES key (nonce challenge).
+    /// Lives in `pending_logins`, keyed by `(uuid, ip)`.
     PendingVerify {
         nonce: u64,
         aes_key: [u8; 32],
@@ -34,6 +35,7 @@ pub enum SessionState {
         client_ip: IpAddr,
     },
     /// Waiting for the user to accept the privacy policy (RGPD consent).
+    /// Lives in `pending_consents`, NOT in `sessions`.
     PendingConsent {
         discord_id: String,
         access_token: String,
@@ -43,6 +45,7 @@ pub enum SessionState {
         created_at: Instant,
     },
     /// Session is active — `DiscordRpcClient` is connected and running.
+    /// Lives in `sessions`.
     Active {
         client: Arc<DiscordRpcClient>,
         aes_key: [u8; 32],

@@ -21,20 +21,37 @@ use log::info;
 
 use crate::session::SessionManager;
 
-/// Periodic cleanup of sessions inactive for `timeout_secs`.
+/// Periodic cleanup of all three stores:
+///
+/// * `sessions` — inactive active sessions (idle timeout).
+/// * `pending_logins` — expired login challenges (>30 s).
+/// * `pending_consents` — expired consent sessions (>5 min).
 pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
     info!("evt=timeout_task_started timeout={timeout_secs}s");
 
     loop {
         tokio::time::sleep(Duration::from_secs(10)).await;
 
+        // Clean up expired active sessions.
         let expired = session_manager
             .get_expired_active_sessions(timeout_secs)
             .await;
-
         for uuid in expired {
             session_manager.terminate_session(&uuid).await;
             info!("evt=session_timeout uuid={uuid}");
+        }
+
+        // Clean up expired pending login challenges.
+        let expired_logins = session_manager.get_expired_pending_logins().await;
+        for (uuid, ip) in expired_logins {
+            session_manager.remove_pending_login(uuid, ip).await;
+        }
+
+        // Clean up expired pending consent sessions.
+        let expired_consents = session_manager.get_expired_pending_consents().await;
+        for temp_token in expired_consents {
+            session_manager.remove_pending_consent(&temp_token).await;
+            info!("evt=pending_consent_timeout temp_token={temp_token}");
         }
     }
 }

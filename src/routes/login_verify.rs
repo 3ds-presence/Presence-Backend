@@ -16,6 +16,7 @@
 
 use std::sync::Arc;
 
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::{extract::State, Form};
 use serde::Deserialize;
@@ -25,6 +26,7 @@ use crate::crypto;
 use crate::response::{error_response, success_response};
 use crate::routes::common::fetch_user_or_404;
 use crate::session::session_error_into_response;
+use crate::utils;
 use crate::utils::mii_utils;
 use crate::validation;
 use crate::AppState;
@@ -40,6 +42,7 @@ pub struct LoginVerifyForm {
 /// POST /login/verify — Prove AES key possession by encrypting the nonce.
 pub async fn handler(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Form(form): Form<LoginVerifyForm>,
 ) -> Result<Response, Response> {
     let uuid = validation::validate_uuid(&form.uuid)?;
@@ -62,11 +65,16 @@ pub async fn handler(
         }
     });
 
-    log::debug!("evt=login_verify uuid={}", auth.uuid);
+    let client_ip = utils::net::extract_client_ip(&headers).ok_or_else(|| {
+        error_response(400, "missing_ip", "Could not determine client IP address")
+    })?;
+
+    log::debug!("evt=login_verify uuid={} ip={client_ip}", auth.uuid);
     state
         .session_manager
         .verify_and_activate(
             &auth,
+            client_ip,
             state.discord_rpc.rpc(),
             &access_token,
             state.config.activity_cooldown_secs,

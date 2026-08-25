@@ -30,19 +30,15 @@ impl SessionManager {
         token_expires_at: i64,
     ) -> Uuid {
         let temp_token = Uuid::new_v4();
-        let uuid = Uuid::new_v4();
-        self.sessions.lock().await.insert(
-            uuid,
-            SessionState::PendingConsent {
-                discord_id,
-                access_token,
-                refresh_token,
-                token_expires_at,
-                temp_token,
-                created_at: Instant::now(),
-            },
-        );
-        self.consent_sessions.lock().await.insert(temp_token, uuid);
+        let state = SessionState::PendingConsent {
+            discord_id,
+            access_token,
+            refresh_token,
+            token_expires_at,
+            temp_token,
+            created_at: Instant::now(),
+        };
+        self.pending_consents.lock().await.insert(temp_token, state);
         log::info!("pending consent session created: temp_token={temp_token}");
         temp_token
     }
@@ -52,18 +48,12 @@ impl SessionManager {
         &self,
         temp_token: &Uuid,
     ) -> Result<(String, String, String, i64), &'static str> {
-        let uuid = self
-            .consent_sessions
+        let state = self
+            .pending_consents
             .lock()
             .await
             .remove(temp_token)
             .ok_or("consent session not found or expired")?;
-        let state = self
-            .sessions
-            .lock()
-            .await
-            .remove(&uuid)
-            .ok_or("consent session not found")?;
         match state {
             SessionState::PendingConsent {
                 discord_id,

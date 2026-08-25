@@ -30,17 +30,22 @@ use std::net::IpAddr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-/// Timeout for pending verification sessions (seconds).
-const PENDING_TIMEOUT_SECS: u64 = 30;
-/// Timeout for pending consent sessions (seconds).
-const PENDING_CONSENT_TIMEOUT_SECS: u64 = 300; // 5 minutes
-
 /// Manages all active and pending sessions, with IP-based rate limiting.
+///
+/// Three independent stores:
+///
+/// * `sessions` — active sessions only (one per UUID).
+/// * `pending_logins` — login challenges, keyed by `(uuid, ip)`.
+/// * `pending_consents` — RGPD consent sessions, keyed by `temp_token`.
 pub struct SessionManager {
+    /// Active sessions, exactly one per UUID. Contains only `SessionState::Active`.
     sessions: Mutex<HashMap<Uuid, SessionState>>,
     ip_counts: Mutex<HashMap<IpAddr, usize>>,
+    /// Pending login challenges keyed by `(uuid, ip)`. Independent of active
+    /// sessions — an attacker who knows the UUID cannot disrupt the real owner.
+    pending_logins: Mutex<HashMap<(Uuid, IpAddr), SessionState>>,
     /// Pending consent sessions indexed by `temp_token`.
-    consent_sessions: Mutex<HashMap<Uuid, Uuid>>, // temp_token -> session uuid
+    pending_consents: Mutex<HashMap<Uuid, SessionState>>,
 }
 
 impl SessionManager {
@@ -48,36 +53,17 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             ip_counts: Mutex::new(HashMap::new()),
-            consent_sessions: Mutex::new(HashMap::new()),
+            pending_logins: Mutex::new(HashMap::new()),
+            pending_consents: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Decrement the IP counter for a given address.
     fn decrement_ip(ip_counts: &mut HashMap<IpAddr, usize>, ip: IpAddr) {
         match ip_counts.get_mut(&ip) {
             Some(count) if *count > 1 => *count -= 1,
             _ => {
                 ip_counts.remove(&ip);
             }
-        }
-    }
-
-    /// Remove a session by UUID, decrement IP counter, and return its state.
-    pub async fn remove_session(&self, uuid: &Uuid) -> Option<SessionState> {
-        let state = self.sessions.lock().await.remove(uuid);
-        if let Some(ref s) = state {
-            self.remove_consent_mapping(s).await;
-            let mut ip_counts = self.ip_counts.lock().await;
-            let ip = s.client_ip();
-            Self::decrement_ip(&mut ip_counts, ip);
-        }
-        state
-    }
-
-    /// If the state is `PendingConsent`, remove the `temp_token` -> uuid mapping.
-    async fn remove_consent_mapping(&self, state: &SessionState) {
-        if let SessionState::PendingConsent { temp_token, .. } = state {
-            self.consent_sessions.lock().await.remove(temp_token);
         }
     }
 }

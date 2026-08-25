@@ -68,10 +68,7 @@ impl SessionManager {
                 *last_activity,
                 *client_ip,
             )),
-            SessionState::PendingVerify { .. } => Err(SessionError::PendingNotActive),
-            SessionState::PendingConsent { .. } => {
-                Err(SessionError::from("session is pending consent, not active"))
-            }
+            _ => Err(SessionError::SessionNotFound),
         };
         drop(sessions);
         result
@@ -101,10 +98,7 @@ impl SessionManager {
                 last_counter.load(Ordering::SeqCst),
                 *last_activity,
             ),
-            SessionState::PendingVerify { .. } => return Err(SessionError::PendingNotActive),
-            SessionState::PendingConsent { .. } => {
-                return Err(SessionError::from("session is pending consent, not active"))
-            }
+            _ => return Err(SessionError::SessionNotFound),
         };
 
         check_cooldown(last_activity, cooldown_secs)?;
