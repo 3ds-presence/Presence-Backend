@@ -162,7 +162,7 @@ impl SessionManager {
             // First connection (or previous session already cleaned up):
             // create a new Discord client and register a fresh session.
             let client = self
-                .create_and_start_client(discord_rpc, access_token)
+                .create_and_start_client(discord_rpc, access_token, auth.uuid)
                 .await?;
             let meta = ActiveSessionMeta {
                 uuid: auth.uuid,
@@ -188,9 +188,10 @@ impl SessionManager {
         &self,
         discord_rpc: &DiscordSocialRpc,
         access_token: &str,
+        uuid: Uuid,
     ) -> Result<Arc<DiscordRpcClient>, SessionError> {
         let client = discord_rpc
-            .create_new_client(access_token)
+            .create_new_client_with_tag(access_token, Some(uuid.to_string()))
             .map_err(|e| SessionError::from(format!("failed to create Discord client: {e}")))?;
         let client = Arc::new(client);
         let client_clone = client.clone();

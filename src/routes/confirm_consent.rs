@@ -79,6 +79,6 @@ pub async fn handler(
 
     let aes_hex = hex::encode(aes_key);
     let body = format!("uuid={uuid}&aes_key_hex={aes_hex}");
-    log::info!("new user {uuid} created after accepting consent");
+    log::info!("new user {discord_id}-{uuid} created after accepting consent");
     Ok(success_response(body))
 }
