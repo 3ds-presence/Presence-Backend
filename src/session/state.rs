@@ -27,10 +27,8 @@ use activity_generator::UserInfo;
 /// State of a session.
 pub enum SessionState {
     /// Waiting for the client to prove they have the AES key (nonce challenge).
-    /// Lives in `pending_logins`, keyed by `(uuid, ip)`.
     PendingVerify {
         nonce: u64,
-        aes_key: [u8; 32],
         created_at: Instant,
         client_ip: IpAddr,
     },

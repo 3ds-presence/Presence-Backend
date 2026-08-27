@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use discord_social_rpc::{DiscordRpcClient, DiscordSocialRpc};
 use uuid::Uuid;
 
-use super::{SessionError, SessionManager, SessionState};
+use super::{EncNonce, SessionError, SessionManager, SessionState};
 use crate::auth::Auth;
 use activity_generator::UserInfo;
 
@@ -37,76 +37,77 @@ struct ActiveSessionMeta {
     user_info: Option<UserInfo>,
 }
 
+/// Everything [`SessionManager::verify_and_activate`] needs beyond the auth
+/// cipher, grouped so the call site stays readable.
+pub struct ActivateSessionParams<'a> {
+    pub aes_key: [u8; 32],
+    pub client_ip: IpAddr,
+    pub discord_rpc: &'a DiscordSocialRpc,
+    pub access_token: &'a str,
+    pub cooldown_secs: u64,
+    pub user_info: Option<UserInfo>,
+}
+
 impl SessionManager {
     // ── Pending login management ────────────────────────────────────────
 
-    /// Create a new pending login challenge. Does NOT touch active sessions.
-    /// A subsequent call with the same `(uuid, ip)` replaces the previous one.
     pub async fn create_pending(
         &self,
         uuid: Uuid,
         aes_key: [u8; 32],
         client_ip: IpAddr,
-    ) -> Result<u64, &'static str> {
+    ) -> u64 {
         let nonce = crate::crypto::generate_nonce();
+        let expected_cipher: EncNonce = crate::crypto::encrypt_login_challenge(nonce, &aes_key);
         self.pending_logins.lock().await.insert(
-            (uuid, client_ip),
+            (uuid, expected_cipher),
             SessionState::PendingVerify {
                 nonce,
-                aes_key,
                 created_at: std::time::Instant::now(),
                 client_ip,
             },
         );
-        Ok(nonce)
+        nonce
     }
 
-    /// Look up and consume the pending login for `(uuid, ip)`, verifying that
-    /// the auth cipher decrypts to the stored nonce. Returns `(nonce, aes_key)`.
+    /// Consume the pending login matching the submitted cipher, if any.
+    ///
+    /// Pure hash-map lookup on `(uuid, submitted hex)` — no decryption. The
+    /// UUID being part of the key, any hit necessarily belongs to this account;
+    /// only a holder of its AES key can have produced a matching `EncNonce`.
+    ///
+    /// On success, every other pending challenge attached to this UUID is
+    /// purged: they are all bogus by definition (spam, stale retries), so a
+    /// single legitimate connection wipes the attacker's flood clean.
     pub async fn extract_pending_login(
         &self,
         auth: &Auth,
         client_ip: IpAddr,
-    ) -> Result<(u64, [u8; 32]), SessionError> {
-        let key = (auth.uuid, client_ip);
+    ) -> Result<u64, SessionError> {
+        let submitted: EncNonce = auth.hex().to_lowercase();
         let mut pending = self.pending_logins.lock().await;
 
-        let (nonce, aes_key) =
-            if let Some(SessionState::PendingVerify { nonce, aes_key, .. }) = pending.get(&key) {
-                (*nonce, *aes_key)
-            } else {
-                // Diagnostic: dump every pending key we hold for this UUID
-                let known_ips: Vec<String> = pending
-                    .keys()
-                    .filter(|(u, _)| u == &auth.uuid)
-                    .map(|(_, ip)| ip.to_string())
-                    .collect();
-                log::warn!(
-                "evt=pending_login_miss uuid={} requested_ip={client_ip} known_ips={known_ips:?}",
+        if let Some(SessionState::PendingVerify { nonce, .. }) = pending.remove(&(auth.uuid, submitted)) {
+            let before = pending.len();
+            pending.retain(|(u, _), _| u != &auth.uuid);
+            let purged = before - pending.len();
+            drop(pending);
+            if purged > 0 {
+                log::info!(
+                    "evt=pending_challenges_purged uuid={} count={purged}",
+                    auth.uuid
+                );
+            }
+            Ok(nonce)
+        } else {
+            log::warn!(
+                "evt=pending_login_miss uuid={} requested_ip={client_ip}",
                 auth.uuid
             );
-                return Err(SessionError::from("no pending login for this (uuid, ip)"));
-            };
-
-        // Verify the nonce by decrypting the auth hex with the stored AES key.
-        let cipher_bytes = hex::decode(auth.hex())
-            .map_err(|_| SessionError::from("invalid hex in auth cipher"))?;
-        if cipher_bytes.len() != 16 {
-            return Err(SessionError::from("invalid cipher length"));
+            Err(SessionError::from(
+                "no pending login for this (uuid, cipher)",
+            ))
         }
-        let mut cipher_arr = [0u8; 16];
-        cipher_arr.copy_from_slice(&cipher_bytes);
-        let plaintext = crate::crypto::decrypt_aes_cbc(&cipher_arr, &aes_key)
-            .map_err(|_| SessionError::from("decryption failed — wrong AES key?"))?;
-        let extracted_nonce = crate::crypto::u64_from_be_bytes(&plaintext);
-        if extracted_nonce != nonce {
-            pending.remove(&key); // consume on mismatch too — one shot
-            return Err(SessionError::from("nonce mismatch"));
-        }
-
-        pending.remove(&key);
-        drop(pending);
-        Ok((nonce, aes_key))
     }
 
     // ── Login verification ──────────────────────────────────────────────
@@ -119,14 +120,20 @@ impl SessionManager {
     pub async fn verify_and_activate(
         &self,
         auth: &Auth,
-        client_ip: IpAddr,
-        discord_rpc: &DiscordSocialRpc,
-        access_token: &str,
-        cooldown_secs: u64,
-        user_info: Option<UserInfo>,
+        params: ActivateSessionParams<'_>,
     ) -> Result<u64, SessionError> {
-        // Find the pending login for this (uuid, ip) and verify the nonce.
-        let (nonce, aes_key) = self.extract_pending_login(auth, client_ip).await?;
+        let ActivateSessionParams {
+            aes_key,
+            client_ip,
+            discord_rpc,
+            access_token,
+            cooldown_secs,
+            user_info,
+        } = params;
+
+        // Look up and consume the pending challenge keyed by the expected
+        // cipher the client just submitted.
+        let nonce = self.extract_pending_login(auth, client_ip).await?;
 
         // Check whether there is already an active session for this UUID.
         let existing_client = {

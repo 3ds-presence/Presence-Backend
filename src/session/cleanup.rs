@@ -14,16 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::net::IpAddr;
 use std::sync::Arc;
 
 use discord_social_rpc::DiscordRpcClient;
 use uuid::Uuid;
 
-use super::{SessionManager, SessionState};
+use super::{EncNonce, SessionManager, SessionState};
 
 /// Timeout for pending login challenges (seconds).
-const PENDING_TIMEOUT_SECS: u64 = 30;
+const PENDING_TIMEOUT_SECS: u64 = 10;
 /// Timeout for pending consent sessions (seconds).
 const PENDING_CONSENT_TIMEOUT_SECS: u64 = 300; // 5 minutes
 
@@ -63,8 +62,8 @@ impl SessionManager {
         self.terminate_session(uuid).await;
     }
 
-    /// Return expired pending logins for cleanup.
-    pub async fn get_expired_pending_logins(&self) -> Vec<(Uuid, IpAddr)> {
+    /// Return expired pending login keys for cleanup.
+    pub async fn get_expired_pending_logins(&self) -> Vec<(Uuid, EncNonce)> {
         self.pending_logins
             .lock()
             .await
@@ -73,7 +72,7 @@ impl SessionManager {
                 let SessionState::PendingVerify { created_at, .. } = state else {
                     return None;
                 };
-                (created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS).then_some(*key)
+                (created_at.elapsed().as_secs() > PENDING_TIMEOUT_SECS).then_some(key.clone())
             })
             .collect()
     }
@@ -93,9 +92,12 @@ impl SessionManager {
             .collect()
     }
 
-    /// Remove a pending login by key.
-    pub async fn remove_pending_login(&self, uuid: Uuid, ip: IpAddr) {
-        self.pending_logins.lock().await.remove(&(uuid, ip));
+    /// Remove a pending login by its `(uuid, expected cipher)` key.
+    pub async fn remove_pending_login(&self, uuid: Uuid, cipher: &EncNonce) {
+        self.pending_logins
+            .lock()
+            .await
+            .remove(&(uuid, cipher.to_owned()));
     }
 
     /// Remove a pending consent by token.

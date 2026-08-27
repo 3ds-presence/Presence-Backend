@@ -25,7 +25,7 @@ use crate::auth::Auth;
 use crate::crypto;
 use crate::response::{error_response, success_response};
 use crate::routes::common::fetch_user_or_404;
-use crate::session::session_error_into_response;
+use crate::session::{session_error_into_response, ActivateSessionParams};
 use crate::utils;
 use crate::utils::mii_utils;
 use crate::validation;
@@ -57,6 +57,10 @@ pub async fn handler(
     let access_token = crypto::decrypt_string_at_rest(&user.access_token, &state.config.master_key)
         .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt access token"))?;
 
+    // The AES key is needed to verify the challenge cipher below.
+    let aes_key = crypto::decrypt_aes_key_at_rest(&user.aes_key, &state.config.master_key)
+        .ok_or_else(|| error_response(500, "crypto_error", "Failed to decrypt AES key"))?;
+
     let user_info = mii.map(|mii| {
         let mii_name = mii_utils::get_mii_name(&mii).ok();
         UserInfo {
@@ -74,11 +78,14 @@ pub async fn handler(
         .session_manager
         .verify_and_activate(
             &auth,
-            client_ip,
-            state.discord_rpc.rpc(),
-            &access_token,
-            state.config.activity_cooldown_secs,
-            user_info,
+            ActivateSessionParams {
+                aes_key,
+                client_ip,
+                discord_rpc: state.discord_rpc.rpc(),
+                access_token: &access_token,
+                cooldown_secs: state.config.activity_cooldown_secs,
+                user_info,
+            },
         )
         .await
         .map_err(|e| session_error_into_response(e, state.config.debug_mode, Some(&auth.uuid)))?;

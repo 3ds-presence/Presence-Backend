@@ -43,8 +43,8 @@ pub async fn run(session_manager: Arc<SessionManager>, timeout_secs: u64) {
 
         // Clean up expired pending login challenges.
         let expired_logins = session_manager.get_expired_pending_logins().await;
-        for (uuid, ip) in expired_logins {
-            session_manager.remove_pending_login(uuid, ip).await;
+        for (uuid, cipher) in expired_logins {
+            session_manager.remove_pending_login(uuid, &cipher).await;
         }
 
         // Clean up expired pending consent sessions.

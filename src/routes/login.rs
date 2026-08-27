@@ -57,11 +57,7 @@ pub async fn handler(
     let nonce = state
         .session_manager
         .create_pending(uuid, aes_key, client_ip)
-        .await
-        .map_err(|_| {
-            log::warn!("evt=create_pending_failed uuid={uuid} ip={client_ip}");
-            error_response(500, "internal_error", "Failed to create login challenge")
-        })?;
+        .await;
 
     let body = format!("nonce={nonce}");
 

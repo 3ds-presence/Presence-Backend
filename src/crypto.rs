@@ -14,7 +14,9 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
+use aes::cipher::{
+    block_padding::Pkcs7, BlockCipherEncrypt, BlockModeDecrypt, KeyIvInit,
+};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use rand::RngExt;
@@ -72,6 +74,22 @@ pub fn decrypt_aes_cbc(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Cry
         .map_err(|_| CryptoError::PaddingInvalid)?;
 
     Ok(pt.to_vec())
+}
+
+/// Server-side mirror of the 3DS login challenge computation
+pub fn encrypt_login_challenge(nonce: u64, key: &[u8; 32]) -> String {
+    // PKCS7 padding for an 8-byte message inside a 16-byte block: 8 × 0x08.
+    const PKCS7_PAD_8: u8 = 8;
+
+    let mut block = [0u8; 16];
+    block[..8].copy_from_slice(&nonce.to_be_bytes());
+    for byte in &mut block[8..] {
+        *byte = PKCS7_PAD_8;
+    }
+
+    let cipher = <aes::Aes256 as aes::cipher::KeyInit>::new(key.into());
+    cipher.encrypt_block((&mut block).into());
+    hex::encode(block)
 }
 
 /// SHA-256 of concatenated fields (raw UTF-8, no delimiter).

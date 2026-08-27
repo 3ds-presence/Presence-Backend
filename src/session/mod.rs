@@ -23,6 +23,7 @@ mod verify;
 
 pub use error::{session_error_into_response, SessionError};
 pub use state::SessionState;
+pub use verify::ActivateSessionParams;
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -30,20 +31,26 @@ use std::net::IpAddr;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// Hex-encoded expected login challenge: `AES-256-CBC(nonce)` under the
+/// account key, computed server-side at `/login`. A legitimate client sends
+/// back exactly this value; only a holder of the AES key can produce it.
+pub type EncNonce = String;
+
 /// Manages all active and pending sessions, with IP-based rate limiting.
 ///
 /// Three independent stores:
 ///
 /// * `sessions` — active sessions only (one per UUID).
-/// * `pending_logins` — login challenges, keyed by `(uuid, ip)`.
+/// * `pending_logins` — login challenges keyed by `(Uuid, EncNonce)`.
 /// * `pending_consents` — RGPD consent sessions, keyed by `temp_token`.
 pub struct SessionManager {
     /// Active sessions, exactly one per UUID. Contains only `SessionState::Active`.
     sessions: Mutex<HashMap<Uuid, SessionState>>,
     ip_counts: Mutex<HashMap<IpAddr, usize>>,
-    /// Pending login challenges keyed by `(uuid, ip)`. Independent of active
-    /// sessions — an attacker who knows the UUID cannot disrupt the real owner.
-    pending_logins: Mutex<HashMap<(Uuid, IpAddr), SessionState>>,
+    /// Pending login challenges keyed by `(owner UUID, expected cipher)`. Only
+    /// a holder of the account's AES key can produce a matching `EncNonce`, so
+    /// possession of the key remains the sole proof of identity.
+    pending_logins: Mutex<HashMap<(Uuid, EncNonce), SessionState>>,
     /// Pending consent sessions indexed by `temp_token`.
     pending_consents: Mutex<HashMap<Uuid, SessionState>>,
 }
