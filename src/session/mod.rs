@@ -18,6 +18,7 @@ mod activity;
 mod cleanup;
 mod consent;
 mod error;
+mod read;
 mod state;
 mod verify;
 

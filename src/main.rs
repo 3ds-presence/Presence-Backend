@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use log::info;
 use sea_orm::DatabaseConnection;
@@ -197,6 +197,7 @@ fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(middleware::request_logger))
+        .route("/server-info", get(routes::server_info::handler))
         .route("/oauth/start", post(routes::oauth_start::handler))
         .route("/register", post(routes::register::handler))
         .route("/confirm-consent", post(routes::confirm_consent::handler))

@@ -14,15 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub mod activity;
-pub mod common;
-pub mod confirm_consent;
-pub mod delete_account;
-pub mod export_data;
-pub mod login;
-pub mod login_verify;
-pub mod logout;
-pub mod oauth_start;
-pub mod register;
-pub mod reset_aes;
-pub mod server_info;
+use std::sync::Arc;
+
+use axum::{extract::State, Json};
+use serde_json::{json, Value};
+
+use crate::AppState;
+
+/// GET /server-info — server stats.
+pub async fn handler(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let connected_users = state.session_manager.active_session_count().await;
+    Json(json!({ "connected_users": connected_users }))
+}

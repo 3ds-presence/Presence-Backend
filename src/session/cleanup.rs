@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
-
-use discord_social_rpc::DiscordRpcClient;
 use uuid::Uuid;
 
 use super::{EncNonce, SessionManager, SessionState};
@@ -41,19 +38,6 @@ impl SessionManager {
                 }
             })
             .collect()
-    }
-
-    pub async fn is_active(&self, uuid: &Uuid) -> bool {
-        let sessions = self.sessions.lock().await;
-        matches!(sessions.get(uuid), Some(SessionState::Active { .. }))
-    }
-
-    pub async fn get_client(&self, uuid: &Uuid) -> Option<Arc<DiscordRpcClient>> {
-        let sessions = self.sessions.lock().await;
-        match sessions.get(uuid) {
-            Some(SessionState::Active { client, .. }) => Some(client.clone()),
-            _ => None,
-        }
     }
 
     /// Remove a session whose Discord connection died (token revoked, gateway
