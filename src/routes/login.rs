@@ -59,7 +59,10 @@ pub async fn handler(
         .create_pending(uuid, aes_key, client_ip)
         .await;
 
-    let body = format!("nonce={nonce}");
+    let version = std::fs::read_to_string("/app/build_info/version")
+        .map_or_else(|_| "v0.0.0".to_string(), |v| v.trim().to_string());
+
+    let body = format!("nonce={nonce}&ver={version}");
 
     Ok(success_response(body))
 }
