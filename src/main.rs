@@ -212,6 +212,7 @@ fn build_router(state: Arc<AppState>) -> Router {
             post(routes::activity::heartbeat_handler),
         )
         .route("/3ds/logout", post(routes::logout::handler))
+        .route("/3ds/script", post(routes::get_script::handler))
         .with_state(state)
 }
 

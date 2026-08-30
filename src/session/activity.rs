@@ -30,48 +30,50 @@ use crate::AppState;
 use activity_generator::UserInfo;
 
 impl SessionManager {
+    /// Run `f` with the active session for `auth.uuid` locked.
+    ///
+    /// The lock is held for the whole closure, so callers can verify and
+    /// commit the counter atomically (replay protection). Returns
+    /// `SessionNotFound` when the session is missing or not active.
+    async fn with_active_session<T>(
+        &self,
+        auth: &Auth,
+        f: impl FnOnce(&mut SessionState) -> Result<T, SessionError>,
+    ) -> Result<T, SessionError> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(&auth.uuid)
+            .ok_or(SessionError::SessionNotFound)?;
+        let res = f(session);
+        drop(sessions);
+        res
+    }
+
     async fn authenticate_and_get_client(
         &self,
         auth: &Auth,
         fields: &[&str],
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, IpAddr, u64), SessionError> {
-        let (client, aes_key, last_counter, last_activity, client_ip) =
-            self.lock_and_fetch_active(auth).await?;
-        check_cooldown(last_activity, cooldown_secs)?;
-        let good_counter = last_counter + 1;
-        crypto::verify_activity_auth(auth.hex(), good_counter, fields, &aes_key)
-            .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
-        Ok((client, client_ip, good_counter))
-    }
-
-    async fn lock_and_fetch_active(
-        &self,
-        auth: &Auth,
-    ) -> Result<(Arc<DiscordRpcClient>, [u8; 32], u64, Instant, IpAddr), SessionError> {
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(&auth.uuid)
-            .ok_or(SessionError::SessionNotFound)?;
-        let result = match session {
-            SessionState::Active {
+        self.with_active_session(auth, |session| {
+            let SessionState::Active {
                 client,
                 aes_key,
                 last_counter,
                 last_activity,
                 client_ip,
                 ..
-            } => Ok((
-                client.clone(),
-                *aes_key,
-                last_counter.load(Ordering::SeqCst),
-                *last_activity,
-                *client_ip,
-            )),
-            _ => Err(SessionError::SessionNotFound),
-        };
-        drop(sessions);
-        result
+            } = session
+            else {
+                return Err(SessionError::SessionNotFound);
+            };
+            check_cooldown(*last_activity, cooldown_secs)?;
+            let good_counter = last_counter.load(Ordering::SeqCst) + 1;
+            crypto::verify_activity_auth(auth.hex(), good_counter, fields, aes_key)
+                .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
+            Ok((client.clone(), *client_ip, good_counter))
+        })
+        .await
     }
 
     pub async fn authenticate_and_tick(
@@ -80,44 +82,82 @@ impl SessionManager {
         fields: &[&str],
         cooldown_secs: u64,
     ) -> Result<(Arc<DiscordRpcClient>, u64), SessionError> {
-        // Counter check + increment under one lock, or concurrent requests bypass replay protection.
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(&auth.uuid)
-            .ok_or(SessionError::SessionNotFound)?;
-        let (client, aes_key, last_counter, last_activity) = match session {
-            SessionState::Active {
+        self.with_active_session(auth, |session| {
+            // Counter check + increment under one lock, or concurrent requests bypass replay protection.
+            let SessionState::Active {
                 client,
                 aes_key,
                 last_counter,
                 last_activity,
                 ..
-            } => (
-                client.clone(),
-                *aes_key,
-                last_counter.load(Ordering::SeqCst),
-                *last_activity,
-            ),
-            _ => return Err(SessionError::SessionNotFound),
-        };
+            } = session
+            else {
+                return Err(SessionError::SessionNotFound);
+            };
+            check_cooldown(*last_activity, cooldown_secs)?;
+            let good_counter = last_counter.load(Ordering::SeqCst) + 1;
+            crypto::verify_activity_auth(auth.hex(), good_counter, fields, aes_key)
+                .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
 
-        check_cooldown(last_activity, cooldown_secs)?;
-        let good_counter = last_counter + 1;
-        crypto::verify_activity_auth(auth.hex(), good_counter, fields, &aes_key)
-            .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
-
-        // Update the counter and activity timestamp under the same lock.
-        if let SessionState::Active {
-            last_counter,
-            last_activity,
-            ..
-        } = session
-        {
+            // Update the counter and activity timestamp under the same lock.
             last_counter.store(good_counter, Ordering::SeqCst);
             *last_activity = Instant::now();
-        }
+            Ok((client.clone(), good_counter))
+        })
+        .await
+    }
+
+    /// Verify an authenticated request and consume one counter tick, without
+    /// applying the activity cooldown or touching `last_activity`.
+    ///
+    /// Used by routes that authenticate client requests but should not affect
+    /// activity pacing. Returns the verified counter so callers can sign a
+    /// response for the same tick.
+    pub async fn verify_and_tick(&self, auth: &Auth, fields: &[&str]) -> Result<u64, SessionError> {
+        self.with_active_session(auth, |session| {
+            // Counter check + increment under one lock, or concurrent requests bypass replay protection.
+            let SessionState::Active {
+                aes_key,
+                last_counter,
+                ..
+            } = session
+            else {
+                return Err(SessionError::SessionNotFound);
+            };
+            let good_counter = last_counter.load(Ordering::SeqCst) + 1;
+            crypto::verify_activity_auth(auth.hex(), good_counter, fields, aes_key)
+                .map_err(|e| SessionError::AuthFailed(e.to_string()))?;
+
+            // Update the counter under the same lock.
+            last_counter.store(good_counter, Ordering::SeqCst);
+            Ok(good_counter)
+        })
+        .await
+    }
+
+    /// Sign a response payload for the active session of `auth.uuid` using the
+    /// account AES key, binding `counter` and `fields` in the same envelope as
+    /// the client-side `build_auth`.
+    ///
+    /// The 3DS decrypts the returned hex with its AES key and checks that the
+    /// counter and the SHA-256 of the fields match, proving the response came
+    /// from the server and was not tampered with or replayed.
+    pub async fn sign_response(
+        &self,
+        auth: &Auth,
+        counter: u64,
+        fields: &[&str],
+    ) -> Result<String, SessionError> {
+        let sessions = self.sessions.lock().await;
+        let session = sessions
+            .get(&auth.uuid)
+            .ok_or(SessionError::SessionNotFound)?;
+        let SessionState::Active { aes_key, .. } = session else {
+            return Err(SessionError::SessionNotFound);
+        };
+        let res = Ok(crypto::encrypt_auth(counter, fields, aes_key));
         drop(sessions);
-        Ok((client, good_counter))
+        res
     }
 
     pub async fn update_activity(

@@ -15,7 +15,7 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use aes::cipher::{
-    block_padding::Pkcs7, BlockCipherEncrypt, BlockModeDecrypt, KeyIvInit,
+    block_padding::Pkcs7, BlockCipherEncrypt, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit,
 };
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
@@ -25,6 +25,7 @@ use std::fmt::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
+type Aes256CbcEnc = cbc::Encryptor<aes::Aes256>;
 type AesKey = [u8; AES_KEY_LEN];
 
 /// Size of our AES-256 key.
@@ -143,6 +144,27 @@ pub fn verify_activity_auth(
     }
 
     Ok(counter)
+}
+
+/// Server-side mirror of the 3DS client `build_auth`: pack the counter
+/// (8 bytes big-endian) + SHA-256 of the fields, AES-256-CBC encrypt with
+/// IV=0 and PKCS7 padding, and return the hex string. The 3DS decrypts it
+/// with the account AES key to verify both the counter and the response hash.
+pub fn encrypt_auth(counter: u64, fields: &[&str], key: &[u8; AES_KEY_LEN]) -> String {
+    let hash = sha256_fields(fields);
+
+    // 8 (counter) + 32 (SHA-256) = 40 bytes, PKCS7-padded to 48.
+    let mut buf = [0u8; 64];
+    buf[..8].copy_from_slice(&counter.to_be_bytes());
+    buf[8..40].copy_from_slice(&hash);
+
+    let iv = [0u8; 16];
+    let cipher = Aes256CbcEnc::new(key.into(), &iv.into());
+    let encrypted = cipher
+        .encrypt_padded::<Pkcs7>(&mut buf, 40)
+        .expect("buffer is large enough for the 40-byte message plus PKCS7 padding");
+
+    hex::encode(encrypted)
 }
 
 /// Constant-time byte equality (no short-circuit on first difference).

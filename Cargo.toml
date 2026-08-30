@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# RPC library
-discord_social_rpc = "0.2.1"
+discord_social_rpc = "0.2.2"
 activity_generator = { path = "../activity_generator" }
 
 # HTTP server

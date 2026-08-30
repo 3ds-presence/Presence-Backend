@@ -51,12 +51,7 @@ pub struct ActivateSessionParams<'a> {
 impl SessionManager {
     // ── Pending login management ────────────────────────────────────────
 
-    pub async fn create_pending(
-        &self,
-        uuid: Uuid,
-        aes_key: [u8; 32],
-        client_ip: IpAddr,
-    ) -> u64 {
+    pub async fn create_pending(&self, uuid: Uuid, aes_key: [u8; 32], client_ip: IpAddr) -> u64 {
         let nonce = crate::crypto::generate_nonce();
         let expected_cipher: EncNonce = crate::crypto::encrypt_login_challenge(nonce, &aes_key);
         self.pending_logins.lock().await.insert(
@@ -87,7 +82,9 @@ impl SessionManager {
         let submitted: EncNonce = auth.hex().to_lowercase();
         let mut pending = self.pending_logins.lock().await;
 
-        if let Some(SessionState::PendingVerify { nonce, .. }) = pending.remove(&(auth.uuid, submitted)) {
+        if let Some(SessionState::PendingVerify { nonce, .. }) =
+            pending.remove(&(auth.uuid, submitted))
+        {
             let before = pending.len();
             pending.retain(|(u, _), _| u != &auth.uuid);
             let purged = before - pending.len();

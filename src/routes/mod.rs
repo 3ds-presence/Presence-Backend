@@ -19,6 +19,7 @@ pub mod common;
 pub mod confirm_consent;
 pub mod delete_account;
 pub mod export_data;
+pub mod get_script;
 pub mod login;
 pub mod login_verify;
 pub mod logout;
