@@ -130,6 +130,7 @@ async fn init_activity_generator(config: &Config) -> ActivityGenerator {
     ActivityGenerator::new(
         &config.scripts_dir,
         &config.assets_base_url,
+        &config.internal_assets_base_url,
         &config.mii_generator_server,
     )
     .await

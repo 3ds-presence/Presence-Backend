@@ -42,7 +42,11 @@ pub struct Config {
     /// Server listen address.
     pub listen_addr: String,
     /// Base URL for game icon images (e.g. "<http://localhost:8080/imgs>/").
+    /// URLs built from this value are sent to Discord, so it must be public.
     pub assets_base_url: String,
+    /// Internal base URL used to fetch `available_titles.json` at startup
+    /// Falls back to `assets_base_url` when not set.
+    pub internal_assets_base_url: String,
     /// Directory containing game scripts (`title_id/script.lua`).
     pub scripts_dir: String,
     /// URL of the Mii generator server (e.g. "<http://localhost:8080/miis>/").
@@ -63,6 +67,12 @@ impl Config {
             env::var("MASTER_KEY").expect("MASTER_KEY must be set in .env (64 hex chars)");
         let master_key = crypto::parse_master_key(&master_key_hex)
             .expect("MASTER_KEY must be a valid 64-char hex string");
+        let assets_base_url = env::var("ASSETS_BASE_URL")
+            .expect("ASSETS_BASE_URL must be set in .env");
+        let internal_assets_base_url = env::var("INTERNAL_ASSETS_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| assets_base_url.clone());
 
         Self {
             master_key,
@@ -85,8 +95,8 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(8),
             listen_addr: env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:5555".to_string()),
-            assets_base_url: env::var("ASSETS_BASE_URL")
-                .expect("ASSETS_BASE_URL must be set in .env"),
+            assets_base_url,
+            internal_assets_base_url,
             scripts_dir: env::var("SCRIPTS_DIR").unwrap_or_else(|_| "/app/scripts".to_string()),
             mii_generator_server: env::var("MII_GENERATOR_SERVER")
                 .expect("MII_GENERATOR_SERVER must be set in .env"),
